@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Singula" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#C8A84B</item>
+        <item name="colorPrimaryVariant">#6A5818</item>
+        <item name="colorOnPrimary">#020810</item>
+        <item name="android:windowBackground">#020810</item>
+        <item name="android:statusBarColor">#020810</item>
+        <item name="android:navigationBarColor">#020810</item>
+    </style>
+</resources>
