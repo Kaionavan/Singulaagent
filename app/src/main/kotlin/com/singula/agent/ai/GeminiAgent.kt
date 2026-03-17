@@ -123,7 +123,7 @@ settings=com.android.settings, maps=com.google.android.apps.maps
     // ══ GROQ API (бесплатный, без региональных ограничений) ══
     private suspend fun callGroq(messages: List<JSONObject>): String = withContext(Dispatchers.IO) {
         val body = JSONObject().apply {
-            put("model", "llama3-8b-8192")
+            put("model", "llama-3.3-70b-versatile")
             put("messages", JSONArray(messages))
             put("max_tokens", 600)
             put("temperature", 0.85)
