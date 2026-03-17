@@ -32,7 +32,7 @@ class CommandExecutor(private val context: Context) {
 
                 "open_app" -> {
                     launchApp(step.target)
-                    delay(2500) // Ждём загрузки приложения
+                    delay(2500)
                 }
 
                 "wait" -> {
@@ -40,48 +40,57 @@ class CommandExecutor(private val context: Context) {
                     delay(ms)
                 }
 
-                // Найти контакт/диалог в Telegram по имени
+                // ══ НАЙТИ КОНТАКТ в Telegram/WhatsApp ══
                 "find_contact" -> {
-                    delay(800)
-                    // Нажимаем кнопку поиска (иконка лупы)
-                    var searchBtn = acc.findNodeByText("поиск")
-                        ?: acc.findNodeByText("search")
-                        ?: acc.findNodeByContentDesc("Search")
+                    delay(1000)
+
+                    // Нажать кнопку поиска
+                    val searchBtn = acc.findNodeByContentDesc("Search")
                         ?: acc.findNodeByContentDesc("Поиск")
+                        ?: acc.findNodeByText("поиск")
+                        ?: acc.findNodeByContentDesc("search")
                     if (searchBtn != null) {
                         acc.clickNode(searchBtn)
-                        delay(600)
+                        delay(800)
                     }
-                    // Вводим имя в поле поиска
-                    val field = waitForEditText(acc, 3000)
-                    if (field != null) {
-                        acc.typeText(field, step.text)
-                        delay(1500) // Ждём результатов поиска
-                        // Кликаем на первый результат
-                        val result = acc.findNodeByText(step.text.split(" ").first())
-                        if (result != null) {
-                            acc.clickNode(result)
-                            delay(1000)
-                        }
+
+                    // Ввести имя
+                    val searchField = waitForEditText(acc, 3000)
+                    if (searchField == null) {
+                        onStatusUpdate?.invoke("Не нашёл поле поиска")
+                        continue
+                    }
+                    acc.clickNode(searchField)
+                    delay(300)
+                    acc.typeText(searchField, step.text)
+                    delay(2000)
+
+                    // Нажать на контакт в результатах (не на EditText!)
+                    val firstName = step.text.split(" ").first()
+                    val contactNode = acc.findContactResult(firstName)
+                    if (contactNode != null) {
+                        acc.clickNode(contactNode)
+                        delay(1500)
+                    } else {
+                        onStatusUpdate?.invoke("Контакт не найден: ${step.text}")
                     }
                 }
 
-                // Ввести текст в поле ввода (сообщение)
+                // ══ ВВЕСТИ ТЕКСТ ══
                 "type_text" -> {
-                    delay(600)
-                    val node = waitForEditText(acc, 4000)
+                    delay(800)
+                    val node = waitForEditText(acc, 5000)
                     if (node != null) {
                         acc.clickNode(node)
-                        delay(300)
+                        delay(400)
                         acc.typeText(node, step.text)
                         delay(400)
                     }
                 }
 
-                // Поиск (YouTube, Google и т.д.)
+                // ══ ПОИСК ══
                 "search" -> {
                     delay(600)
-                    // Сначала ищем кнопку поиска если поле не видно
                     var field = acc.findEditText()
                     if (field == null) {
                         val searchIcon = acc.findNodeByContentDesc("Search")
@@ -98,7 +107,6 @@ class CommandExecutor(private val context: Context) {
                         delay(400)
                         acc.typeText(field, step.text)
                         delay(600)
-                        // Нажимаем кнопку поиска/Enter
                         val send = acc.findSendButton()
                         if (send != null) acc.clickNode(send)
                         else acc.pressEnterKey()
@@ -106,10 +114,9 @@ class CommandExecutor(private val context: Context) {
                     }
                 }
 
-                // Отправить сообщение
+                // ══ ОТПРАВИТЬ ══
                 "send" -> {
-                    delay(400)
-                    // Ищем кнопку отправки по всем вариантам
+                    delay(500)
                     val btn = acc.findSendButton()
                         ?: acc.findNodeByContentDesc("Send")
                         ?: acc.findNodeByContentDesc("Отправить")
@@ -118,13 +125,12 @@ class CommandExecutor(private val context: Context) {
                         acc.clickNode(btn)
                         delay(600)
                     } else {
-                        // Пробуем Enter
                         acc.pressEnterKey()
                         delay(600)
                     }
                 }
 
-                // Нажать на элемент по тексту
+                // ══ НАЖАТЬ ══
                 "click" -> {
                     delay(400)
                     when (step.target) {
@@ -144,36 +150,22 @@ class CommandExecutor(private val context: Context) {
                     delay(500)
                 }
 
-                // Прокрутка
-                "scroll_down" -> {
-                    acc.swipeDown()
-                    delay(500)
-                }
+                "scroll_down" -> { acc.swipeDown(); delay(500) }
+                "scroll_up"   -> { acc.swipeUp();   delay(500) }
+                "back"        -> { acc.pressBack();  delay(500) }
+                "home"        -> { acc.pressHome();  delay(300) }
 
-                "scroll_up" -> {
-                    acc.swipeUp()
-                    delay(500)
-                }
-
-                "back" -> {
-                    acc.pressBack()
-                    delay(500)
-                }
-
-                "home" -> {
-                    acc.pressHome()
-                    delay(300)
-                }
-
-                "done" -> return step.description.ifEmpty { "Готово, сэр." }
+                "done"  -> return step.description.ifEmpty { "Готово, сэр." }
                 "error" -> return "Не смог выполнить, сэр."
             }
         }
         return "Выполнено, сэр."
     }
 
-    // Ждём появления поля ввода (с таймаутом)
-    private suspend fun waitForEditText(acc: SingulaAccessibilityService, timeoutMs: Long): AccessibilityNodeInfo? {
+    private suspend fun waitForEditText(
+        acc: SingulaAccessibilityService,
+        timeoutMs: Long
+    ): AccessibilityNodeInfo? {
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeoutMs) {
             val node = acc.findEditText()
@@ -191,14 +183,33 @@ class CommandExecutor(private val context: Context) {
                 context.startActivity(intent)
                 true
             } else {
-                val market = Intent(Intent.ACTION_VIEW,
-                    Uri.parse("market://details?id=$packageName"))
+                val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName"))
                 market.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(market)
                 false
             }
         } catch (e: Exception) { false }
     }
+}
+
+fun SingulaAccessibilityService.findContactResult(name: String): AccessibilityNodeInfo? {
+    val root = rootInActiveWindow ?: return null
+    return findContactNode(root, name.lowercase())
+}
+
+private fun findContactNode(node: AccessibilityNodeInfo, name: String): AccessibilityNodeInfo? {
+    val text = node.text?.toString()?.lowercase() ?: ""
+    val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+    val isEditText = node.className?.toString()?.contains("EditText") == true
+    if (!isEditText && node.isClickable && (text.contains(name) || desc.contains(name))) {
+        return node
+    }
+    for (i in 0 until node.childCount) {
+        val child = node.getChild(i) ?: continue
+        val found = findContactNode(child, name)
+        if (found != null) return found
+    }
+    return null
 }
 
 fun SingulaAccessibilityService.findFirstResult(): AccessibilityNodeInfo? {
