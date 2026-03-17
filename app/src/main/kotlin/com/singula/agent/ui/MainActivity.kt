@@ -26,7 +26,6 @@ import com.singula.agent.service.SystemMonitor
 import com.singula.agent.voice.VoiceEngine
 import com.singula.agent.voice.WakeWordDetector
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,12 +35,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wakeDetector: WakeWordDetector
     private lateinit var sysMonitor: SystemMonitor
 
-    // UI
     private lateinit var chatLayout: LinearLayout
     private lateinit var scrollView: ScrollView
     private lateinit var inputField: EditText
     private lateinit var voiceBtn: Button
-    private lateinit var statusDot: TextView
     private lateinit var statusLabel: TextView
     private lateinit var batteryText: TextView
     private lateinit var netText: TextView
@@ -51,33 +48,37 @@ class MainActivity : AppCompatActivity() {
     private var isBusy = false
     private var wakeActive = false
     private val prefs by lazy { getSharedPreferences("singula", Context.MODE_PRIVATE) }
-
     private val PHOTO_REQUEST = 200
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-        buildUI()
-        init()
-        checkPermissions()
-        startMetricsUpdate()
+        try {
+            buildUI()
+            init()
+            requestMicPermission()
+        } catch (e: Exception) {
+            // Если что-то пошло не так — показываем простой экран
+            val tv = TextView(this)
+            tv.text = "SINGULA\n\nОшибка запуска: ${e.message}"
+            tv.setTextColor(Color.WHITE)
+            tv.setBackgroundColor(Color.parseColor("#020810"))
+            tv.setPadding(40, 100, 40, 40)
+            tv.textSize = 16f
+            setContentView(tv)
+        }
     }
 
-    // ═══════════════════════════════════════
-    // BUILD UI
-    // ═══════════════════════════════════════
     private fun buildUI() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#020810"))
-            fitsSystemWindows = true
         }
 
-        // ── HEADER ──
+        // HEADER
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#030D20"))
-            setPadding(24, 48, 24, 16)
+            setPadding(24, 48, 24, 12)
         }
         val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -91,46 +92,31 @@ class MainActivity : AppCompatActivity() {
             letterSpacing = 0.25f
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val statusRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setOnClickListener { showKeyDialog() }
-        }
-        statusDot = TextView(this).apply {
-            text = "●"; textSize = 10f
-            setTextColor(Color.parseColor("#22FF88"))
-        }
         statusLabel = TextView(this).apply {
-            text = " ОНЛАЙН"
+            text = "● ЗАПУСК"
             textSize = 10f
-            setTextColor(Color.parseColor("#22FF88"))
-            letterSpacing = 0.1f
+            setTextColor(Color.parseColor("#C8A84B"))
         }
-        statusRow.addView(statusDot)
-        statusRow.addView(statusLabel)
         topRow.addView(logo)
-        topRow.addView(statusRow)
+        topRow.addView(statusLabel)
         header.addView(topRow)
 
-        // Метрики
         val metricsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 8, 0, 0)
+            setPadding(0, 6, 0, 0)
         }
-        batteryText = metricView("🔋 ---%")
-        netText = metricView("📶 ---")
-        timeText = metricView("🕐 --:--")
+        batteryText = TextView(this).apply { text = "🔋 --"; textSize = 10f; setTextColor(Color.parseColor("#4A6080")); setPadding(0,0,16,0) }
+        netText = TextView(this).apply { text = "📶 --"; textSize = 10f; setTextColor(Color.parseColor("#4A6080")); setPadding(0,0,16,0) }
+        timeText = TextView(this).apply { text = "🕐 --:--"; textSize = 10f; setTextColor(Color.parseColor("#4A6080")) }
         metricsRow.addView(batteryText)
         metricsRow.addView(netText)
         metricsRow.addView(timeText)
         header.addView(metricsRow)
         root.addView(header)
 
-        // ── CHAT ──
+        // CHAT
         scrollView = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-            )
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
             setBackgroundColor(Color.parseColor("#020810"))
         }
         chatLayout = LinearLayout(this).apply {
@@ -140,32 +126,29 @@ class MainActivity : AppCompatActivity() {
         scrollView.addView(chatLayout)
         root.addView(scrollView)
 
-        // ── QUICK COMMANDS ──
-        val qcRow = LinearLayout(this).apply {
+        // QUICK BUTTONS
+        val qRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(8, 4, 8, 4)
         }
-        val cmds = listOf("📷 Фото", "💻 Статус", "🧠 Память", "⏰ Время")
-        val actions = listOf(
-            { openCamera() },
-            { processCommand("статус всех систем") },
-            { showMemory() },
-            { processCommand("который час") }
-        )
-        cmds.forEachIndexed { i, label ->
+        listOf("📷 Фото" to { openCamera() },
+               "💻 Статус" to { processCommand("статус систем") },
+               "🧠 Память" to { showMemory() },
+               "⚙️ Ключ" to { showKeyDialog() }
+        ).forEach { (label, action) ->
             val btn = Button(this).apply {
                 text = label; textSize = 10f
                 setTextColor(Color.parseColor("#4A6080"))
                 setBackgroundColor(Color.parseColor("#060F22"))
-                layoutParams = LinearLayout.LayoutParams(0, 72, 1f).apply { setMargins(3, 0, 3, 0) }
-                setPadding(4, 0, 4, 0)
-                setOnClickListener { actions[i]() }
+                layoutParams = LinearLayout.LayoutParams(0, 68, 1f).apply { setMargins(3,0,3,0) }
+                setPadding(2,0,2,0)
+                setOnClickListener { action() }
             }
-            qcRow.addView(btn)
+            qRow.addView(btn)
         }
-        root.addView(qcRow)
+        root.addView(qRow)
 
-        // ── VOICE BUTTON ──
+        // VOICE BUTTON
         voiceBtn = Button(this).apply {
             text = "🎤   НАЖМИ И ГОВОРИ"
             textSize = 14f
@@ -178,48 +161,45 @@ class MainActivity : AppCompatActivity() {
         voiceBtn.setOnClickListener { toggleVoice() }
         root.addView(voiceBtn)
 
-        // ── WAKE WORD TOGGLE ──
+        // WAKE SWITCH
         val wakeRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(16, 0, 16, 4)
+            setPadding(16, 2, 16, 2)
         }
         val wakeLabel = TextView(this).apply {
-            text = "Слушать 'Сингула' всегда:"
+            text = "Слушать 'Сингула' постоянно:"
             textSize = 11f
             setTextColor(Color.parseColor("#4A6080"))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         val wakeSwitch = Switch(this).apply {
             isChecked = prefs.getBoolean("wake_active", false)
-            thumbTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#C8A84B"))
             setOnCheckedChangeListener { _, checked ->
                 wakeActive = checked
                 prefs.edit().putBoolean("wake_active", checked).apply()
-                if (checked) startWakeDetector() else stopWakeDetector()
-                addMessage("system", if (checked) "Wake word активирован. Скажите 'Сингула' в любой момент." else "Wake word отключён.")
+                if (checked) startWake() else stopWake()
             }
         }
         wakeRow.addView(wakeLabel)
         wakeRow.addView(wakeSwitch)
         root.addView(wakeRow)
 
-        // ── INPUT ROW ──
+        // INPUT
         val inputRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(12, 0, 12, 12)
-            gravity = Gravity.BOTTOM
+            setPadding(12, 0, 12, 16)
         }
         inputField = EditText(this).apply {
             hint = "Введите команду..."
             setHintTextColor(Color.parseColor("#2A3A50"))
             setTextColor(Color.parseColor("#C0D0E8"))
             setBackgroundColor(Color.parseColor("#040A1A"))
-            setPadding(18, 14, 18, 14)
+            setPadding(16, 14, 16, 14)
             textSize = 14f
             maxLines = 3
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { setMargins(0, 0, 8, 0) }
+                .apply { setMargins(0,0,8,0) }
         }
         val sendBtn = Button(this).apply {
             text = "▶"
@@ -240,15 +220,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(root)
     }
 
-    private fun metricView(text: String) = TextView(this).apply {
-        this.text = text; textSize = 10f
-        setTextColor(Color.parseColor("#4A6080"))
-        setPadding(0, 4, 16, 0)
-    }
-
-    // ═══════════════════════════════════════
-    // INIT
-    // ═══════════════════════════════════════
     private fun init() {
         agent = GeminiAgent(this)
         executor = CommandExecutor(this)
@@ -263,121 +234,113 @@ class MainActivity : AppCompatActivity() {
 
         voice.onListening = { runOnUiThread {
             isListening = true
-            voiceBtn.text = "🔴   СЛУШАЮ..."; voiceBtn.setTextColor(Color.parseColor("#FF4422"))
+            voiceBtn.text = "🔴   СЛУШАЮ..."
+            voiceBtn.setTextColor(Color.parseColor("#FF4422"))
         }}
         voice.onResult = { text -> runOnUiThread {
             isListening = false
-            voiceBtn.text = "🎤   НАЖМИ И ГОВОРИ"; voiceBtn.setTextColor(Color.parseColor("#4AB0FF"))
+            voiceBtn.text = "🎤   НАЖМИ И ГОВОРИ"
+            voiceBtn.setTextColor(Color.parseColor("#4AB0FF"))
             processCommand(text)
         }}
         voice.onError = { err -> runOnUiThread {
             isListening = false
-            voiceBtn.text = "🎤   НАЖМИ И ГОВОРИ"; voiceBtn.setTextColor(Color.parseColor("#4AB0FF"))
+            voiceBtn.text = "🎤   НАЖМИ И ГОВОРИ"
+            voiceBtn.setTextColor(Color.parseColor("#4AB0FF"))
             if (err != "Ничего не услышал") addMessage("system", err)
         }}
 
         sysMonitor.onAlert = { alert -> runOnUiThread {
-            addMessage("ai", alert); voice.speak(alert)
+            addMessage("ai", alert)
+            voice.speak(alert)
         }}
-        sysMonitor.startMonitoring()
 
-        startService(Intent(this, SingulaForegroundService::class.java))
+        try { sysMonitor.startMonitoring() } catch (e: Exception) {}
+        try { startService(Intent(this, SingulaForegroundService::class.java)) } catch (e: Exception) {}
+
+        startMetricsUpdate()
 
         Handler(Looper.getMainLooper()).postDelayed({
-            val greeting = sysMonitor.getCurrentTime()
-            addMessage("ai", "$greeting Все системы в норме. Нажмите кнопку или скажите 'Сингула'.")
-            voice.speak("$greeting Готова к работе.")
-            if (key.isEmpty()) showKeyDialog()
-        }, 800)
-
-        if (prefs.getBoolean("wake_active", false)) {
-            wakeActive = true
-            startWakeDetector()
-        }
+            try {
+                val greeting = sysMonitor.getCurrentTime()
+                addMessage("ai", "$greeting Все системы в норме. Готова к работе.")
+                voice.speak("$greeting Готова к работе.")
+                if (key.isEmpty()) showKeyDialog()
+                if (prefs.getBoolean("wake_active", false)) { wakeActive = true; startWake() }
+            } catch (e: Exception) {
+                addMessage("system", "SINGULA запущена.")
+            }
+        }, 1000)
     }
 
-    // ═══════════════════════════════════════
-    // VOICE
-    // ═══════════════════════════════════════
     private fun toggleVoice() {
         if (isListening) { voice.stopListening(); return }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
             return
         }
-        voice.startListening()
+        try { voice.startListening() } catch (e: Exception) {
+            addMessage("system", "Ошибка микрофона: ${e.message}")
+        }
     }
 
-    private fun startWakeDetector() {
+    private fun startWake() {
         wakeDetector.onWakeWord = { runOnUiThread {
-            addMessage("system", "Слушаю вас, сэр...")
+            addMessage("system", "Слушаю, сэр...")
             voice.speak("Да, сэр?")
-            voice.startListening()
+            Handler(Looper.getMainLooper()).postDelayed({ toggleVoice() }, 800)
         }}
         wakeDetector.onCommand = { cmd -> runOnUiThread { processCommand(cmd) } }
-        wakeDetector.start()
+        try { wakeDetector.start() } catch (e: Exception) {}
     }
 
-    private fun stopWakeDetector() { wakeDetector.stop() }
+    private fun stopWake() {
+        try { wakeDetector.stop() } catch (e: Exception) {}
+    }
 
-    // ═══════════════════════════════════════
-    // PROCESS COMMAND
-    // ═══════════════════════════════════════
     private fun processCommand(text: String) {
         if (isBusy) return
         addMessage("user", text)
-        isBusy = true; setStatus("Анализирую...")
+        isBusy = true
+        setStatus("Думаю...")
 
         lifecycleScope.launch {
             try {
                 val key = prefs.getString("gemini_key", "") ?: ""
                 if (key.isEmpty()) {
-                    addMessage("ai", "Нужен API ключ, сэр."); showKeyDialog(); return@launch
+                    addMessage("ai", "Нужен API ключ, сэр.")
+                    showKeyDialog()
+                    return@launch
                 }
                 agent.setApiKey(key)
 
-                // Специальные команды
                 val lower = text.lowercase()
                 when {
-                    lower.contains("статус") && lower.contains("систем") -> {
+                    lower.contains("статус") -> {
                         val info = sysMonitor.getSystemInfo()
-                        addMessage("ai", info); voice.speak("Статус систем готов, сэр.")
+                        addMessage("ai", info); voice.speak("Статус готов, сэр.")
                         return@launch
                     }
-                    lower.contains("память") || lower.contains("что ты помнишь") -> {
-                        showMemory(); return@launch
-                    }
-                    lower.contains("который час") || lower.contains("сколько времени") || lower.contains("время") -> {
+                    lower.contains("который час") || lower.contains("время") -> {
                         val t = sysMonitor.getCurrentTime()
                         addMessage("ai", t); voice.speak(t); return@launch
                     }
-                    lower.contains("забудь") -> {
-                        agent.memory.recall(text).forEach { agent.memory.forget(it.id) }
-                        val r = "Удалено из памяти, сэр."
-                        addMessage("ai", r); voice.speak(r); return@launch
+                    lower.contains("память") -> {
+                        showMemory(); return@launch
                     }
                 }
 
-                // Нужно ли выполнять на телефоне?
                 if (isPhoneCommand(lower)) {
-                    setStatus("Планирую шаги...")
+                    setStatus("Планирую...")
                     val steps = agent.parseCommand(text)
-
-                    // Сначала отвечаем голосом
-                    val chatReply = agent.chat(text)
-                    val cleanReply = chatReply.replace(Regex("\\[ACTION:[^\\]]*\\]"), "").trim()
-                    addMessage("ai", cleanReply)
-                    voice.speak(cleanReply)
-
-                    // Потом выполняем
-                    if (isAccessibilityEnabled()) {
-                        setStatus("Выполняю...")
-                        executor.execute(steps)
-                    } else {
-                        executor.execute(steps) // Попробуем всё равно через url_launcher
-                    }
+                    val reply = agent.chat(text)
+                    val clean = reply.replace(Regex("\\[ACTION:[^\\]]*\\]"), "").trim()
+                    addMessage("ai", clean)
+                    voice.speak(clean)
+                    setStatus("Выполняю...")
+                    executor.execute(steps)
                 } else {
-                    // Просто разговор
                     setStatus("Думаю...")
                     val reply = agent.chat(text)
                     val clean = reply.replace(Regex("\\[ACTION:[^\\]]*\\]"), "").trim()
@@ -385,198 +348,183 @@ class MainActivity : AppCompatActivity() {
                     voice.speak(clean)
                 }
             } catch (e: Exception) {
-                val err = "Помехи в канале, сэр."
-                addMessage("ai", err); voice.speak(err)
+                addMessage("ai", "Помехи в канале, сэр.")
             } finally {
                 isBusy = false; setStatus("ОНЛАЙН")
             }
         }
     }
 
-    // ═══════════════════════════════════════
-    // CAMERA / PHOTO ANALYSIS
-    // ═══════════════════════════════════════
     private fun openCamera() {
-        val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-        if (intent.resolveActivity(packageManager) != null) {
-            startActivityForResult(intent, PHOTO_REQUEST)
-        }
+        try {
+            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+            if (intent.resolveActivity(packageManager) != null)
+                startActivityForResult(intent, PHOTO_REQUEST)
+        } catch (e: Exception) { addMessage("system", "Камера недоступна") }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == PHOTO_REQUEST && resultCode == RESULT_OK) {
             val bitmap = data?.extras?.get("data") as? Bitmap ?: return
-            addMessage("user", "📷 [Отправил фото]")
-            setStatus("Анализирую фото...")
+            addMessage("user", "📷 [Фото]")
             isBusy = true
             lifecycleScope.launch {
-                val reply = agent.describeImage(bitmap, "Опиши подробно что видишь на этом фото")
-                addMessage("ai", reply)
-                voice.speak("Анализ завершён, сэр.")
-                isBusy = false; setStatus("ОНЛАЙН")
+                try {
+                    val reply = agent.describeImage(bitmap)
+                    addMessage("ai", reply)
+                    voice.speak("Анализ завершён, сэр.")
+                } catch (e: Exception) {
+                    addMessage("ai", "Не удалось проанализировать фото, сэр.")
+                } finally { isBusy = false }
             }
         }
     }
 
-    // ═══════════════════════════════════════
-    // MEMORY VIEWER
-    // ═══════════════════════════════════════
     private fun showMemory() {
-        val memories = agent.memory.recall()
-        if (memories.isEmpty()) {
-            addMessage("ai", "Память пуста, сэр. Расскажите мне о себе.")
+        val mems = agent.memory.recall()
+        if (mems.isEmpty()) {
+            addMessage("ai", "Память пуста, сэр.")
             voice.speak("Память пуста, сэр.")
-            return
+        } else {
+            val sb = StringBuilder("Помню:\n")
+            mems.forEach { sb.append("▸ ${it.content}\n") }
+            addMessage("ai", sb.toString())
+            voice.speak("Показал память, сэр.")
         }
-        val sb = StringBuilder("Вот что я помню, сэр:\n")
-        memories.forEach { sb.append("▸ [${it.type}] ${it.content}\n") }
-        addMessage("ai", sb.toString())
-        voice.speak("Показал что помню, сэр.")
     }
 
-    // ═══════════════════════════════════════
-    // UI HELPERS
-    // ═══════════════════════════════════════
     private fun addMessage(role: String, text: String) {
-        val isAi = role == "ai"
-        val isSystem = role == "system"
-
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = if (isAi || isSystem) Gravity.START else Gravity.END
-            setPadding(0, 3, 0, 3)
-        }
-        if (!isSystem) {
-            val nameView = TextView(this).apply {
-                this.text = when (role) { "ai" -> "SINGULA"; "user" -> "ОПЕРАТОР"; else -> "" }
-                textSize = 9f
-                setTextColor(Color.parseColor("#3A4A60"))
-                setPadding(6, 0, 6, 2)
+        try {
+            val isAi = role == "ai"
+            val isSystem = role == "system"
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = if (!isAi && !isSystem) Gravity.END else Gravity.START
+                setPadding(0, 3, 0, 3)
             }
-            container.addView(nameView)
-        }
-        val bubble = TextView(this).apply {
-            this.text = text
-            textSize = 14f
-            setPadding(18, 12, 18, 12)
-            maxWidth = (resources.displayMetrics.widthPixels * 0.82).toInt()
-            setTextColor(when(role) {
-                "ai" -> Color.parseColor("#BCD6F8")
-                "system" -> Color.parseColor("#4A8060")
-                else -> Color.parseColor("#C0D0E8")
-            })
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = 14f
-                setColor(when(role) {
-                    "ai" -> Color.parseColor("#0A1E38")
-                    "system" -> Color.parseColor("#041208")
-                    else -> Color.parseColor("#140C02")
-                })
-                setStroke(1, when(role) {
-                    "ai" -> Color.parseColor("#1A3A60")
-                    "system" -> Color.parseColor("#0A2818")
-                    else -> Color.parseColor("#3A2808")
-                })
+            if (!isSystem) {
+                val name = TextView(this).apply {
+                    this.text = if (isAi) "SINGULA" else "ВЫ"
+                    textSize = 9f; setTextColor(Color.parseColor("#3A4A60"))
+                    setPadding(6, 0, 6, 2)
+                }
+                container.addView(name)
             }
-        }
-        container.addView(bubble)
-        chatLayout.addView(container)
-        scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
+            val bubble = TextView(this).apply {
+                this.text = text; textSize = 14f
+                setPadding(16, 12, 16, 12)
+                maxWidth = (resources.displayMetrics.widthPixels * 0.82).toInt()
+                setTextColor(when(role) {
+                    "ai" -> Color.parseColor("#BCD6F8")
+                    "system" -> Color.parseColor("#4A8060")
+                    else -> Color.parseColor("#C0D0E8")
+                })
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 14f
+                    setColor(when(role) {
+                        "ai" -> Color.parseColor("#0A1E38")
+                        "system" -> Color.parseColor("#041208")
+                        else -> Color.parseColor("#140C02")
+                    })
+                    setStroke(1, when(role) {
+                        "ai" -> Color.parseColor("#1A3A60")
+                        "system" -> Color.parseColor("#0A2818")
+                        else -> Color.parseColor("#3A2808")
+                    })
+                }
+            }
+            container.addView(bubble)
+            chatLayout.addView(container)
+            scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
+        } catch (e: Exception) {}
     }
 
     private fun setStatus(text: String) {
-        val isOnline = text == "ОНЛАЙН"
-        statusDot.setTextColor(if (isOnline) Color.parseColor("#22FF88") else Color.parseColor("#C8A84B"))
-        statusLabel.text = " $text"
-        statusLabel.setTextColor(if (isOnline) Color.parseColor("#22FF88") else Color.parseColor("#C8A84B"))
+        try {
+            val online = text == "ОНЛАЙН"
+            statusLabel.text = "● $text"
+            statusLabel.setTextColor(
+                if (online) Color.parseColor("#22FF88") else Color.parseColor("#C8A84B")
+            )
+        } catch (e: Exception) {}
     }
 
     private fun startMetricsUpdate() {
         val handler = Handler(Looper.getMainLooper())
-        val runnable = object : Runnable {
+        val r = object : Runnable {
             override fun run() {
-                batteryText.text = "🔋 ${sysMonitor.getBatteryLevel()}%${if(sysMonitor.isCharging()) "⚡" else ""}"
-                netText.text = "📶 ${sysMonitor.getNetworkInfo()}"
-                val cal = java.util.Calendar.getInstance()
-                timeText.text = "🕐 ${String.format("%02d:%02d", cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))}"
+                try {
+                    batteryText.text = "🔋 ${sysMonitor.getBatteryLevel()}%${if(sysMonitor.isCharging())"⚡" else ""}"
+                    netText.text = "📶 ${sysMonitor.getNetworkInfo()}"
+                    val c = java.util.Calendar.getInstance()
+                    timeText.text = "🕐 ${String.format("%02d:%02d", c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE))}"
+                } catch (e: Exception) {}
                 handler.postDelayed(this, 30_000)
             }
         }
-        handler.post(runnable)
+        handler.post(r)
     }
 
     private fun showKeyDialog() {
-        val input = EditText(this).apply {
-            hint = "AIza... (Gemini API Key)"
-            setHintTextColor(Color.parseColor("#4A6080"))
-            setTextColor(Color.parseColor("#C0D0E8"))
-            setBackgroundColor(Color.parseColor("#040A1A"))
-            setPadding(20, 16, 20, 16)
-            setText(prefs.getString("gemini_key", "") ?: "")
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Gemini API Key")
-            .setMessage("Бесплатно на aistudio.google.com")
-            .setView(input)
-            .setPositiveButton("Сохранить") { _, _ ->
-                val key = input.text.toString().trim()
-                if (key.isNotEmpty()) {
-                    prefs.edit().putString("gemini_key", key).apply()
-                    agent.setApiKey(key)
-                    addMessage("ai", "Ключ сохранён. Готова к работе, сэр!")
-                    voice.speak("Ключ принят. Готова к работе, сэр!")
-                }
+        try {
+            val input = EditText(this).apply {
+                hint = "AIza... (Gemini API Key)"
+                setHintTextColor(Color.parseColor("#4A6080"))
+                setTextColor(Color.parseColor("#C0D0E8"))
+                setBackgroundColor(Color.parseColor("#040A1A"))
+                setPadding(20, 16, 20, 16)
+                setText(prefs.getString("gemini_key", "") ?: "")
             }
-            .setNegativeButton("Отмена", null).show()
+            AlertDialog.Builder(this)
+                .setTitle("Gemini API Key")
+                .setMessage("Бесплатно на aistudio.google.com")
+                .setView(input)
+                .setPositiveButton("Сохранить") { _, _ ->
+                    val key = input.text.toString().trim()
+                    if (key.isNotEmpty()) {
+                        prefs.edit().putString("gemini_key", key).apply()
+                        agent.setApiKey(key)
+                        addMessage("ai", "Ключ сохранён. Готова к работе, сэр!")
+                        voice.speak("Ключ принят. Готова к работе, сэр!")
+                    }
+                }
+                .setNegativeButton("Отмена", null).show()
+        } catch (e: Exception) {}
     }
 
     private fun isPhoneCommand(text: String): Boolean {
-        val keywords = listOf("открой","запусти","включи","найди","поищи","напиши",
-            "отправь","позвони","youtube","ютуб","telegram","телеграм","whatsapp",
-            "вотсап","instagram","spotify","тикток","discord","вконтакте","вк",
-            "браузер","настройки","будильник","таймер","загугли","soundcloud",
-            "netflix","карты","маршрут","deepseek","дипсик","зайди","перейди",
-            "скачай","установи","сфотографируй")
-        return keywords.any { text.contains(it) }
+        val kw = listOf("открой","запусти","включи","найди","поищи","напиши",
+            "отправь","позвони","youtube","ютуб","telegram","телеграм",
+            "whatsapp","вотсап","instagram","spotify","тикток","discord",
+            "вконтакте","браузер","настройки","будильник","таймер","загугли")
+        return kw.any { text.contains(it) }
     }
 
     private fun isAccessibilityEnabled(): Boolean {
-        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        return am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-            .any { it.id.contains("singula") }
+        return try {
+            val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+            am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                .any { it.id.contains("singula") }
+        } catch (e: Exception) { false }
     }
 
-    private fun checkPermissions() {
-        val needed = mutableListOf<String>()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
-            needed.add(Manifest.permission.RECORD_AUDIO)
-        if (needed.isNotEmpty()) ActivityCompat.requestPermissions(this, needed.toTypedArray(), 100)
-
-        if (!isAccessibilityEnabled()) {
-            Handler(Looper.getMainLooper()).postDelayed({
-                AlertDialog.Builder(this)
-                    .setTitle("⚡ Включить управление")
-                    .setMessage("Для управления приложениями включите SINGULA в:\n\nНастройки → Специальные возможности → Загруженные приложения → SINGULA Agent → ВКЛ")
-                    .setPositiveButton("Открыть настройки") { _, _ ->
-                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    }
-                    .setNegativeButton("Позже", null).show()
-            }, 2500)
+    private fun requestMicPermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 100)
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            if (wakeActive) startWakeDetector()
-        }
+        // Разрешение дано — всё готово
     }
 
     override fun onDestroy() {
-        voice.destroy()
-        wakeDetector.stop()
-        sysMonitor.stopMonitoring()
+        try { voice.destroy() } catch (e: Exception) {}
+        try { wakeDetector.stop() } catch (e: Exception) {}
+        try { sysMonitor.stopMonitoring() } catch (e: Exception) {}
         super.onDestroy()
     }
 }
