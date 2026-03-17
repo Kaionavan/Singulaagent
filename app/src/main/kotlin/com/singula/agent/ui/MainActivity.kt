@@ -297,10 +297,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun startWake() {
         wakeDetector.onWakeWord = { runOnUiThread {
-            // Услышали "Сингула" — отвечаем, wake detector сам продолжает слушать
+            wakeDetector.pause()
             addMessage("system", "Слушаю, сэр...")
             voice.speak("Да, сэр?")
-            // НЕ вызываем toggleVoice — wake detector уже слушает следующую фразу
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!isBusy) voice.startListening()
+            }, 1500)
         }}
         wakeDetector.onCommand = { cmd -> runOnUiThread { processCommand(cmd) } }
         try { wakeDetector.start() } catch (e: Exception) {}
