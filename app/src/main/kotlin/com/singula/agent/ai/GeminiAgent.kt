@@ -86,7 +86,7 @@ Actions:
 - find_contact: text=имя контакта (для Telegram/WhatsApp — сначала открыть, потом искать)
 - type_text: text=текст для ввода в поле
 - search: text=поисковый запрос
-- click: target=текст кнопки или "first_result"/"back"/"home"
+- click: target=текст кнопки или "first_result" или "back" или "home"
 - send: отправить сообщение (нажать кнопку отправки)
 - scroll_down: прокрутить вниз
 - scroll_up: прокрутить вверх
@@ -142,23 +142,8 @@ tiktok=com.zhiliaoapp.musically
         }
     }
 
-        try {
-            val messages = listOf(
-                JSONObject().apply { put("role","system"); put("content","Отвечай только JSON.") },
-                JSONObject().apply { put("role","user"); put("content",prompt) }
-            )
-            val raw = callGroq(messages)
-            val text = JSONObject(raw).getJSONArray("choices")
-                .getJSONObject(0).getJSONObject("message").getString("content")
-            parseSteps(text)
-        } catch (e: Exception) {
-            listOf(AgentStep("error", description = e.message ?: ""))
-        }
-    }
-
     suspend fun describeImage(bitmap: Bitmap, prompt: String = "Опиши подробно"): String =
         withContext(Dispatchers.IO) {
-            // Для анализа изображений используем Gemini vision если есть ключ
             try { callVision(prompt, bitmapB64(bitmap)) }
             catch (e: Exception) { "Анализ изображений требует Gemini ключ, сэр." }
         }
