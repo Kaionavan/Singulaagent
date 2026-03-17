@@ -37,41 +37,38 @@ class GeminiAgent(private val context: Context) {
     suspend fun chat(userMessage: String): String = withContext(Dispatchers.IO) {
         val ctx = memory.getContextString()
         val history = memory.getHistory()
-        val contents = mutableListOf<JSONObject>()
-        history.takeLast(10).forEach { (role, text) ->
-            contents.add(JSONObject().apply {
-                put("role", if (role == "ai") "model" else "user")
-                put("parts", JSONArray().put(JSONObject().put("text", text)))
-            })
-        }
-        contents.add(JSONObject().apply {
-            put("role", "user")
-            put("parts", JSONArray().put(JSONObject().put("text", userMessage)))
+
+        val messages = mutableListOf<JSONObject>()
+        messages.add(JSONObject().apply {
+            put("role", "system")
+            put("content", "$SYS\n\n$ctx")
         })
-        val body = JSONObject().apply {
-            put("systemInstruction", JSONObject().put("parts",
-                JSONArray().put(JSONObject().put("text", "$SYS\n\n$ctx"))))
-            put("contents", JSONArray(contents))
-            put("generationConfig", JSONObject().apply {
-                put("maxOutputTokens", 600)
-                put("temperature", 0.85)
+        history.takeLast(10).forEach { (role, text) ->
+            messages.add(JSONObject().apply {
+                put("role", if (role == "ai") "assistant" else "user")
+                put("content", text)
             })
         }
+        messages.add(JSONObject().apply {
+            put("role", "user")
+            put("content", userMessage)
+        })
+
         val reply = try {
-            val raw = callRaw(body.toString())
+            val raw = callGroq(messages)
             val json = JSONObject(raw)
-            // Проверяем на ошибку от API
             if (json.has("error")) {
-                val err = json.getJSONObject("error")
-                "Ошибка API: ${err.optString("message", "неизвестная ошибка")}"
+                "Ошибка: ${json.getJSONObject("error").optString("message")}"
             } else {
-                json.getJSONArray("candidates")
-                    .getJSONObject(0).getJSONObject("content")
-                    .getJSONArray("parts").getJSONObject(0).getString("text")
+                json.getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
             }
         } catch (e: Exception) {
             "Помехи в канале связи, сэр. (${e.message})"
         }
+
         memory.addToHistory("user", userMessage)
         memory.addToHistory("ai", reply)
         extractFacts(userMessage)
@@ -83,19 +80,24 @@ class GeminiAgent(private val context: Context) {
 Разбей команду на шаги для Android телефона.
 Команда: "$command"
 Ответь ТОЛЬКО JSON массивом [{action,target,text,description}].
-Actions: open_app, type_text, search, click, send, back, wait, done, error
+Actions: open_app, type_text, search, click, send, back, wait, done
 Пакеты: youtube=com.google.android.youtube, telegram=org.telegram.messenger,
 whatsapp=com.whatsapp, instagram=com.instagram.android,
 spotify=com.spotify.music, vk=com.vkontakte.android,
 discord=com.discord, chrome=com.android.chrome,
-settings=com.android.settings, calculator=com.android.calculator2,
-maps=com.google.android.apps.maps, gmail=com.google.android.gm
+settings=com.android.settings, maps=com.google.android.apps.maps
 Пример: [{"action":"open_app","target":"com.google.android.youtube","description":"Открываю YouTube"},{"action":"search","text":"губка боб","description":"Ищу"}]
 Только JSON без markdown.
         """.trimIndent()
         try {
-            val raw = callText(prompt)
-            parseSteps(raw)
+            val messages = listOf(
+                JSONObject().apply { put("role","system"); put("content","Отвечай только JSON.") },
+                JSONObject().apply { put("role","user"); put("content",prompt) }
+            )
+            val raw = callGroq(messages)
+            val text = JSONObject(raw).getJSONArray("choices")
+                .getJSONObject(0).getJSONObject("message").getString("content")
+            parseSteps(text)
         } catch (e: Exception) {
             listOf(AgentStep("error", description = e.message ?: ""))
         }
@@ -103,8 +105,9 @@ maps=com.google.android.apps.maps, gmail=com.google.android.gm
 
     suspend fun describeImage(bitmap: Bitmap, prompt: String = "Опиши подробно"): String =
         withContext(Dispatchers.IO) {
+            // Для анализа изображений используем Gemini vision если есть ключ
             try { callVision(prompt, bitmapB64(bitmap)) }
-            catch (e: Exception) { "Не удалось проанализировать изображение, сэр." }
+            catch (e: Exception) { "Анализ изображений требует Gemini ключ, сэр." }
         }
 
     private fun extractFacts(text: String) {
@@ -117,45 +120,44 @@ maps=com.google.android.apps.maps, gmail=com.google.android.gm
         }
     }
 
-    private suspend fun callText(prompt: String): String {
+    // ══ GROQ API (бесплатный, без региональных ограничений) ══
+    private suspend fun callGroq(messages: List<JSONObject>): String = withContext(Dispatchers.IO) {
         val body = JSONObject().apply {
-            put("contents", JSONArray().put(JSONObject().apply {
-                put("role", "user")
-                put("parts", JSONArray().put(JSONObject().put("text", prompt)))
-            }))
+            put("model", "llama3-8b-8192")
+            put("messages", JSONArray(messages))
+            put("max_tokens", 600)
+            put("temperature", 0.85)
         }
-        val raw = callRaw(body.toString())
-        return JSONObject(raw).getJSONArray("candidates")
-            .getJSONObject(0).getJSONObject("content")
-            .getJSONArray("parts").getJSONObject(0).getString("text")
+        val req = Request.Builder()
+            .url("https://api.groq.com/openai/v1/chat/completions")
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        client.newCall(req).execute().use { it.body?.string() ?: "{}" }
     }
 
     private suspend fun callVision(prompt: String, imageB64: String): String {
-        val body = JSONObject().apply {
-            put("contents", JSONArray().put(JSONObject().apply {
-                put("role", "user")
-                put("parts", JSONArray().apply {
-                    put(JSONObject().put("text", prompt))
-                    put(JSONObject().apply {
-                        put("inline_data", JSONObject().apply {
-                            put("mime_type", "image/jpeg")
-                            put("data", imageB64)
-                        })
+        val contents = JSONArray().put(JSONObject().apply {
+            put("role", "user")
+            put("parts", JSONArray().apply {
+                put(JSONObject().put("text", prompt))
+                put(JSONObject().apply {
+                    put("inline_data", JSONObject().apply {
+                        put("mime_type", "image/jpeg")
+                        put("data", imageB64)
                     })
                 })
-            }))
-        }
-        val raw = callRaw(body.toString())
+            })
+        })
+        val body = JSONObject().apply { put("contents", contents) }
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        val req = Request.Builder().url(url)
+            .post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        val raw = client.newCall(req).execute().use { it.body?.string() ?: "{}" }
         return JSONObject(raw).getJSONArray("candidates")
             .getJSONObject(0).getJSONObject("content")
             .getJSONArray("parts").getJSONObject(0).getString("text")
-    }
-
-    private suspend fun callRaw(bodyStr: String): String = withContext(Dispatchers.IO) {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=$apiKey"
-        val req = Request.Builder().url(url)
-            .post(bodyStr.toRequestBody("application/json".toMediaType())).build()
-        client.newCall(req).execute().use { it.body?.string() ?: "{}" }
     }
 
     private fun parseSteps(json: String): List<AgentStep> {
