@@ -19,9 +19,7 @@ class VoiceEngine(private val context: Context) {
     var onListening: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
-    init {
-        initTTS()
-    }
+    init { initTTS() }
 
     private fun initTTS() {
         tts = TextToSpeech(context) { status ->
@@ -37,62 +35,47 @@ class VoiceEngine(private val context: Context) {
     fun speak(text: String) {
         if (ttsReady) {
             tts?.stop()
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "singula_${System.currentTimeMillis()}")
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sng_${System.currentTimeMillis()}")
         }
     }
 
     fun startListening() {
         stopListening()
-
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             onError?.invoke("Распознавание речи недоступно")
             return
         }
-
         recognizer = SpeechRecognizer.createSpeechRecognizer(context)
         recognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { onListening?.invoke() }
+            override fun onReadyForSpeech(p: Bundle?) { onListening?.invoke() }
             override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onRmsChanged(v: Float) {}
+            override fun onBufferReceived(b: ByteArray?) {}
             override fun onEndOfSpeech() {}
-
             override fun onResults(results: Bundle?) {
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val text = matches?.firstOrNull()
-                if (!text.isNullOrBlank()) {
-                    onResult?.invoke(text)
-                } else {
-                    onError?.invoke("Ничего не услышал")
-                }
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                if (!text.isNullOrBlank()) onResult?.invoke(text)
+                else onError?.invoke("Ничего не услышал")
             }
-
             override fun onError(error: Int) {
                 val msg = when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH -> "Не понял, повторите"
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Слишком тихо"
                     SpeechRecognizer.ERROR_AUDIO -> "Ошибка микрофона"
                     SpeechRecognizer.ERROR_NETWORK -> "Нет сети"
-                    SpeechRecognizer.ERROR_NOT_RECOGNIZED -> "Не распознано"
-                    else -> "Ошибка $error"
+                    else -> "Ошибка распознавания"
                 }
                 onError?.invoke(msg)
             }
-
-            override fun onPartialResults(partialResults: Bundle?) {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
+            override fun onPartialResults(p: Bundle?) {}
+            override fun onEvent(e: Int, p: Bundle?) {}
         })
-
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU")
-            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
         }
-
         recognizer?.startListening(intent)
     }
 
