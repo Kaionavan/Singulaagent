@@ -2,10 +2,10 @@ package com.singula.agent.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
-import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.*
@@ -52,6 +52,23 @@ class SingulaAccessibilityService : AccessibilityService() {
         return null
     }
 
+    // ══ НАЙТИ УЗЕЛ ПО CONTENT DESCRIPTION ══
+    fun findNodeByContentDesc(desc: String): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        return findNodeDesc(root, desc.lowercase())
+    }
+
+    private fun findNodeDesc(node: AccessibilityNodeInfo, desc: String): AccessibilityNodeInfo? {
+        val d = node.contentDescription?.toString()?.lowercase() ?: ""
+        if (d.contains(desc)) return node
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = findNodeDesc(child, desc)
+            if (found != null) return found
+        }
+        return null
+    }
+
     // ══ НАЙТИ ПОЛЕ ВВОДА ══
     fun findEditText(): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
@@ -71,21 +88,33 @@ class SingulaAccessibilityService : AccessibilityService() {
     // ══ НАЙТИ КНОПКУ ОТПРАВКИ ══
     fun findSendButton(): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
-        val keywords = listOf("send", "отправить", "отправ", "submit", "search", "поиск", "go")
+        // Ключевые слова для Telegram, WhatsApp, и других мессенджеров
+        val keywords = listOf(
+            "send", "отправить", "отправ",
+            "submit", "search", "поиск", "go",
+            "done", "готово"
+        )
         for (kw in keywords) {
             val node = findNode(root, kw)
-            if (node != null && (node.isClickable || node.className?.toString()?.contains("Button") == true)) {
+            if (node != null && (node.isClickable || node.className?.toString()?.contains("Button") == true ||
+                node.className?.toString()?.contains("ImageView") == true)) {
                 return node
             }
         }
-        // Ищем кнопку по типу
+        // Ищем по contentDescription
+        val descKeywords = listOf("Send", "Отправить", "Search", "Поиск", "Done")
+        for (kw in descKeywords) {
+            val node = findNodeByContentDesc(kw)
+            if (node != null && node.isClickable) return node
+        }
         return findClickableButton(root)
     }
 
     private fun findClickableButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         if (node.isClickable && (
             node.className?.toString()?.contains("Button") == true ||
-            node.className?.toString()?.contains("ImageView") == true
+            node.className?.toString()?.contains("ImageView") == true ||
+            node.className?.toString()?.contains("ImageButton") == true
         )) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
@@ -109,7 +138,21 @@ class SingulaAccessibilityService : AccessibilityService() {
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
-    // ══ НАЖАТЬ ENTER ══
+    // ══ НАЖАТЬ ENTER (отправка сообщения) ══
+    fun pressEnterKey() {
+        performGlobalAction(GLOBAL_ACTION_KEYCODE_HEADSETHOOK)
+        // Альтернативный метод через жест
+        val root = rootInActiveWindow ?: return
+        val editText = findEditNode(root)
+        if (editText != null) {
+            val args = Bundle()
+            args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT,
+                AccessibilityNodeInfo.MOVEMENT_GRANULARITY_PARAGRAPH)
+            editText.performAction(AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY, args)
+        }
+    }
+
+    // ══ НАЖАТЬ ENTER (старый метод) ══
     fun pressEnter(node: AccessibilityNodeInfo): Boolean {
         val args = Bundle()
         args.putInt(
@@ -139,10 +182,21 @@ class SingulaAccessibilityService : AccessibilityService() {
     // ══ СВАЙП ВНИЗ ══
     fun swipeDown() {
         val path = Path()
-        path.moveTo(540f, 300f)
-        path.lineTo(540f, 1200f)
+        path.moveTo(540f, 800f)
+        path.lineTo(540f, 200f)
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 300))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 400))
+            .build()
+        dispatchGesture(gesture, null, null)
+    }
+
+    // ══ СВАЙП ВВЕРХ ══
+    fun swipeUp() {
+        val path = Path()
+        path.moveTo(540f, 200f)
+        path.lineTo(540f, 800f)
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 400))
             .build()
         dispatchGesture(gesture, null, null)
     }
