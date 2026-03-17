@@ -40,18 +40,18 @@ class WakeWordDetector(private val context: Context) {
         destroyRecognizer()
     }
 
-    // Пауза пока SINGULA говорит — иначе слышит свой голос
+    // Вызывается когда SINGULA начала говорить — останавливаем микрофон
     fun pause() {
         isPaused = true
         handler.removeCallbacksAndMessages(null)
         destroyRecognizer()
     }
 
-    // Возобновить после того как SINGULA замолчала
+    // Вызывается когда SINGULA замолчала — возобновляем
     fun resume() {
         if (!isRunning) return
         isPaused = false
-        handler.postDelayed({ listenCycle() }, 300)
+        handler.postDelayed({ listenCycle() }, 500)
     }
 
     private fun destroyRecognizer() {
@@ -87,8 +87,7 @@ class WakeWordDetector(private val context: Context) {
     private fun listenCycle() {
         if (!isRunning || isPaused) return
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            scheduleRestart(3000)
-            return
+            scheduleRestart(3000); return
         }
 
         destroyRecognizer()
@@ -108,26 +107,20 @@ class WakeWordDetector(private val context: Context) {
                 unmuteBeep()
                 if (isPaused) { scheduleRestart(1000); return }
 
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.map { it.lowercase().trim() } ?: emptyList()
+                val matches = results
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.map { it.lowercase().trim() }
+                    ?: emptyList()
 
-                // Ищем wake word в любом из вариантов
-                val matchedText = matches.firstOrNull { result ->
-                    wakeWords.any { result.contains(it) }
-                } ?: ""
+                val matchedText = matches.firstOrNull { t -> wakeWords.any { t.contains(it) } } ?: ""
 
                 if (matchedText.isNotEmpty()) {
                     var command = matchedText
-                    wakeWords.sortedByDescending { it.length }.forEach {
-                        command = command.replace(it, "")
-                    }
+                    wakeWords.sortedByDescending { it.length }.forEach { command = command.replace(it, "") }
                     command = command.trim().trimStart(',', '.', ' ', '-')
 
-                    if (command.length > 2) {
-                        onCommand?.invoke(command)
-                    } else {
-                        onWakeWord?.invoke()
-                    }
+                    if (command.length > 2) onCommand?.invoke(command)
+                    else onWakeWord?.invoke()
                 }
 
                 scheduleRestart(500)
@@ -138,16 +131,11 @@ class WakeWordDetector(private val context: Context) {
                 val delay = when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH,
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 600L
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
-                        restartAttempts++
-                        1500L + (restartAttempts * 300L)
-                    }
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> { restartAttempts++; 1500L + (restartAttempts * 300L) }
                     SpeechRecognizer.ERROR_AUDIO -> 2000L
                     SpeechRecognizer.ERROR_CLIENT -> 1000L
                     SpeechRecognizer.ERROR_NETWORK -> 3000L
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
-                        isRunning = false; return
-                    }
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> { isRunning = false; return }
                     else -> 1000L
                 }
                 val finalDelay = if (restartAttempts > 5) { restartAttempts = 0; 5000L } else delay
@@ -167,10 +155,6 @@ class WakeWordDetector(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 300L)
         }
 
-        try {
-            recognizer?.startListening(intent)
-        } catch (e: Exception) {
-            scheduleRestart(2000)
-        }
+        try { recognizer?.startListening(intent) } catch (e: Exception) { scheduleRestart(2000) }
     }
 }

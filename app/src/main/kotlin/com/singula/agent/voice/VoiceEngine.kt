@@ -3,6 +3,8 @@ package com.singula.agent.voice
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -15,13 +17,13 @@ class VoiceEngine(private val context: Context) {
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     var onResult: ((String) -> Unit)? = null
     var onListening: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
     var onSpeakDone: (() -> Unit)? = null
-
-    // Колбэк для паузы/возобновления wake word детектора
+    // Эти два колбэка подключает MainActivity для паузы wake word
     var onSpeakStart: (() -> Unit)? = null
     var onSpeakEnd: (() -> Unit)? = null
 
@@ -30,9 +32,8 @@ class VoiceEngine(private val context: Context) {
     private fun initTTS() {
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                val ruResult = tts?.setLanguage(Locale("ru", "RU"))
-                if (ruResult == TextToSpeech.LANG_MISSING_DATA ||
-                    ruResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+                val result = tts?.setLanguage(Locale("ru", "RU"))
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                     tts?.setLanguage(Locale.ENGLISH)
                 }
                 tts?.setSpeechRate(0.88f)
@@ -41,18 +42,16 @@ class VoiceEngine(private val context: Context) {
 
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
-                        // Говорим wake word детектору — пауза, иначе услышит свой голос
-                        onSpeakStart?.invoke()
+                        // Говорим wake word детектору — пауза
+                        mainHandler.post { onSpeakStart?.invoke() }
                     }
                     override fun onDone(utteranceId: String?) {
-                        onSpeakDone?.invoke()
-                        // Возобновляем wake word через 800мс после конца речи
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            onSpeakEnd?.invoke()
-                        }, 800)
+                        mainHandler.post { onSpeakDone?.invoke() }
+                        // Возобновляем wake word через 1 секунду после конца речи
+                        mainHandler.postDelayed({ onSpeakEnd?.invoke() }, 1000)
                     }
                     override fun onError(utteranceId: String?) {
-                        onSpeakEnd?.invoke()
+                        mainHandler.post { onSpeakEnd?.invoke() }
                     }
                 })
             }
@@ -64,14 +63,13 @@ class VoiceEngine(private val context: Context) {
         tts?.stop()
         val clean = text
             .replace(Regex("\\[ACTION:[^\\]]*\\]"), "")
-            .replace("▸", "")
-            .replace("●", "")
+            .replace("▸", "").replace("●", "").replace("⚠️", "")
             .trim()
         if (clean.isEmpty()) return
         tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "sng_${System.currentTimeMillis()}")
     }
 
-    fun isSpeaking(): Boolean = tts?.isSpeaking == true
+    fun isSpeaking() = tts?.isSpeaking == true
 
     fun startListening() {
         stopListening()
