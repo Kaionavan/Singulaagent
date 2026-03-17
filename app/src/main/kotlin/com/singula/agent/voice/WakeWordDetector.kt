@@ -2,6 +2,7 @@ package com.singula.agent.voice
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -13,30 +14,55 @@ class WakeWordDetector(private val context: Context) {
     private var recognizer: SpeechRecognizer? = null
     private var isRunning = false
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var audioManager: AudioManager? = null
 
     var onWakeWord: (() -> Unit)? = null
     var onCommand: ((String) -> Unit)? = null
 
-    private val wakeWords = listOf("сингула", "singula", "сингула", "слушай")
+    private val wakeWords = listOf("сингула", "singula", "слушай")
 
     fun start() {
+        if (isRunning) return
         isRunning = true
+        // Отключаем системные звуки распознавания речи
+        audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         listenCycle()
     }
 
     fun stop() {
         isRunning = false
-        recognizer?.stopListening()
-        recognizer?.destroy()
+        try { recognizer?.stopListening() } catch (e: Exception) {}
+        try { recognizer?.destroy() } catch (e: Exception) {}
         recognizer = null
         scope.cancel()
+    }
+
+    private fun muteBeep() {
+        try {
+            audioManager?.adjustStreamVolume(
+                AudioManager.STREAM_NOTIFICATION,
+                AudioManager.ADJUST_MUTE, 0
+            )
+        } catch (e: Exception) {}
+    }
+
+    private fun unmuteBeep() {
+        try {
+            audioManager?.adjustStreamVolume(
+                AudioManager.STREAM_NOTIFICATION,
+                AudioManager.ADJUST_UNMUTE, 0
+            )
+        } catch (e: Exception) {}
     }
 
     private fun listenCycle() {
         if (!isRunning) return
         if (!SpeechRecognizer.isRecognitionAvailable(context)) return
 
-        recognizer?.destroy()
+        try { recognizer?.destroy() } catch (e: Exception) {}
+
+        muteBeep() // Заглушаем бипы
+
         recognizer = SpeechRecognizer.createSpeechRecognizer(context)
         recognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(p: Bundle?) {}
@@ -44,45 +70,40 @@ class WakeWordDetector(private val context: Context) {
             override fun onRmsChanged(v: Float) {}
             override fun onBufferReceived(b: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onPartialResults(p: Bundle?) {
-                val partial = p?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()?.lowercase() ?: return
-                if (wakeWords.any { partial.contains(it) }) {
-                    recognizer?.stopListening()
-                }
-            }
 
             override fun onResults(results: Bundle?) {
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                unmuteBeep()
+                val text = results
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()?.lowercase() ?: ""
 
-                val hasWakeWord = wakeWords.any { text.contains(it) }
-                if (hasWakeWord) {
-                    // Извлекаем команду после wake word
+                val hasWake = wakeWords.any { text.contains(it) }
+                if (hasWake) {
                     var command = text
-                    for (w in wakeWords) {
-                        command = command.replace(w, "").trim()
-                    }
+                    wakeWords.forEach { command = command.replace(it, "") }
+                    command = command.trim()
                     if (command.isNotBlank()) {
                         onCommand?.invoke(command)
                     } else {
                         onWakeWord?.invoke()
                     }
                 }
-                // Перезапускаем цикл
+                // Перезапускаем
                 scope.launch {
-                    delay(500)
+                    delay(300)
                     if (isRunning) listenCycle()
                 }
             }
 
             override fun onError(error: Int) {
+                unmuteBeep()
                 scope.launch {
-                    delay(1000)
+                    delay(1500)
                     if (isRunning) listenCycle()
                 }
             }
 
+            override fun onPartialResults(p: Bundle?) {}
             override fun onEvent(e: Int, p: Bundle?) {}
         })
 
@@ -90,11 +111,15 @@ class WakeWordDetector(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            // Отключаем звук начала/конца
+            putExtra("android.speech.extra.DICTATION_MODE", true)
         }
 
-        try { recognizer?.startListening(intent) } catch (e: Exception) {
+        try {
+            recognizer?.startListening(intent)
+        } catch (e: Exception) {
             scope.launch { delay(2000); if (isRunning) listenCycle() }
         }
     }

@@ -7,6 +7,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 
 class VoiceEngine(private val context: Context) {
@@ -18,25 +19,44 @@ class VoiceEngine(private val context: Context) {
     var onResult: ((String) -> Unit)? = null
     var onListening: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onSpeakDone: (() -> Unit)? = null
 
     init { initTTS() }
 
     private fun initTTS() {
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("ru", "RU")
-                tts?.setSpeechRate(0.95f)
-                tts?.setPitch(0.9f)
+                // Ставим русский язык
+                val ruResult = tts?.setLanguage(Locale("ru", "RU"))
+                if (ruResult == TextToSpeech.LANG_MISSING_DATA ||
+                    ruResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    // Если русского нет — ставим английский
+                    tts?.setLanguage(Locale.ENGLISH)
+                }
+                tts?.setSpeechRate(0.88f)  // чуть медленнее — понятнее
+                tts?.setPitch(0.85f)        // чуть ниже — мужественнее
                 ttsReady = true
+
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) { onSpeakDone?.invoke() }
+                    override fun onError(utteranceId: String?) {}
+                })
             }
         }
     }
 
     fun speak(text: String) {
-        if (ttsReady) {
-            tts?.stop()
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sng_${System.currentTimeMillis()}")
-        }
+        if (!ttsReady) return
+        tts?.stop()
+        // Очищаем текст от спецсимволов перед озвучкой
+        val clean = text
+            .replace(Regex("\\[ACTION:[^\\]]*\\]"), "")
+            .replace("▸", "")
+            .replace("●", "")
+            .trim()
+        if (clean.isEmpty()) return
+        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "sng_${System.currentTimeMillis()}")
     }
 
     fun startListening() {
@@ -53,7 +73,9 @@ class VoiceEngine(private val context: Context) {
             override fun onBufferReceived(b: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onResults(results: Bundle?) {
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                val text = results
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
                 if (!text.isNullOrBlank()) onResult?.invoke(text)
                 else onError?.invoke("Ничего не услышал")
             }
@@ -62,32 +84,38 @@ class VoiceEngine(private val context: Context) {
                     SpeechRecognizer.ERROR_NO_MATCH -> "Не понял, повторите"
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Слишком тихо"
                     SpeechRecognizer.ERROR_AUDIO -> "Ошибка микрофона"
-                    SpeechRecognizer.ERROR_NETWORK -> "Нет сети"
-                    else -> "Ошибка распознавания"
+                    SpeechRecognizer.ERROR_NETWORK -> "Нет сети для распознавания"
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Нет разрешения на микрофон"
+                    else -> "Ошибка $error"
                 }
                 onError?.invoke(msg)
             }
             override fun onPartialResults(p: Bundle?) {}
             override fun onEvent(e: Int, p: Bundle?) {}
         })
+
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU")
+            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
         }
-        recognizer?.startListening(intent)
+        try { recognizer?.startListening(intent) } catch (e: Exception) {
+            onError?.invoke("Ошибка запуска микрофона")
+        }
     }
 
     fun stopListening() {
-        recognizer?.stopListening()
-        recognizer?.destroy()
+        try { recognizer?.stopListening() } catch (e: Exception) {}
+        try { recognizer?.destroy() } catch (e: Exception) {}
         recognizer = null
     }
 
     fun destroy() {
         stopListening()
-        tts?.stop()
-        tts?.shutdown()
+        try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
     }
 }
