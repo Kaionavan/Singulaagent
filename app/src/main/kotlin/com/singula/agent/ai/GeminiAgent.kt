@@ -80,15 +80,68 @@ class GeminiAgent(private val context: Context) {
 Разбей команду на шаги для Android телефона.
 Команда: "$command"
 Ответь ТОЛЬКО JSON массивом [{action,target,text,description}].
-Actions: open_app, type_text, search, click, send, back, wait, done
-Пакеты: youtube=com.google.android.youtube, telegram=org.telegram.messenger,
-whatsapp=com.whatsapp, instagram=com.instagram.android,
-spotify=com.spotify.music, vk=com.vkontakte.android,
-discord=com.discord, chrome=com.android.chrome,
-settings=com.android.settings, maps=com.google.android.apps.maps
-Пример: [{"action":"open_app","target":"com.google.android.youtube","description":"Открываю YouTube"},{"action":"search","text":"губка боб","description":"Ищу"}]
-Только JSON без markdown.
+
+Actions:
+- open_app: target=пакет приложения
+- find_contact: text=имя контакта (для Telegram/WhatsApp — сначала открыть, потом искать)
+- type_text: text=текст для ввода в поле
+- search: text=поисковый запрос
+- click: target=текст кнопки или "first_result"/"back"/"home"
+- send: отправить сообщение (нажать кнопку отправки)
+- scroll_down: прокрутить вниз
+- scroll_up: прокрутить вверх
+- wait: text=миллисекунды ожидания
+- back: кнопка назад
+- done: description=финальный ответ пользователю
+
+Пакеты приложений:
+youtube=com.google.android.youtube
+telegram=org.telegram.messenger
+whatsapp=com.whatsapp
+instagram=com.instagram.android
+spotify=com.spotify.music
+vk=com.vkontakte.android
+discord=com.discord
+chrome=com.android.chrome
+settings=com.android.settings
+maps=com.google.android.apps.maps
+tiktok=com.zhiliaoapp.musically
+
+Примеры:
+
+"Открой Telegram, напиши Асель привет":
+[
+  {"action":"open_app","target":"org.telegram.messenger","description":"Открываю Telegram"},
+  {"action":"find_contact","text":"Асель","description":"Ищу контакт Асель"},
+  {"action":"type_text","text":"привет","description":"Пишу сообщение"},
+  {"action":"send","description":"Отправляю"},
+  {"action":"done","description":"Сообщение отправлено, сэр."}
+]
+
+"Открой YouTube, найди губка боб":
+[
+  {"action":"open_app","target":"com.google.android.youtube","description":"Открываю YouTube"},
+  {"action":"search","text":"губка боб","description":"Ищу губка боб"},
+  {"action":"click","target":"first_result","description":"Открываю первый результат"},
+  {"action":"done","description":"Включаю видео, сэр."}
+]
+
+Только JSON без markdown и объяснений.
         """.trimIndent()
+        try {
+            val messages = listOf(
+                JSONObject().apply { put("role","system"); put("content","Отвечай только JSON массивом. Никакого текста кроме JSON.") },
+                JSONObject().apply { put("role","user"); put("content",prompt) }
+            )
+            val raw = callGroq(messages)
+            val text = JSONObject(raw).getJSONArray("choices")
+                .getJSONObject(0).getJSONObject("message").getString("content")
+            parseSteps(text)
+        } catch (e: Exception) {
+            listOf(AgentStep("error", description = e.message ?: ""))
+        }
+    }
+
         try {
             val messages = listOf(
                 JSONObject().apply { put("role","system"); put("content","Отвечай только JSON.") },
