@@ -249,6 +249,17 @@ class MainActivity : AppCompatActivity() {
             if (err != "Ничего не услышал") addMessage("system", err)
         }}
 
+        // ══ ГЛАВНОЕ ИСПРАВЛЕНИЕ WAKE WORD ══
+        // Когда SINGULA начинает говорить — останавливаем прослушивание
+        // Иначе слышит свой голос и уходит в бесконечный цикл
+        voice.onSpeakStart = {
+            if (wakeActive) wakeDetector.pause()
+        }
+        // Когда замолчала — возобновляем через 800мс
+        voice.onSpeakEnd = {
+            if (wakeActive) wakeDetector.resume()
+        }
+
         sysMonitor.onAlert = { alert -> runOnUiThread {
             addMessage("ai", alert)
             voice.speak(alert)
@@ -336,19 +347,15 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Команда управления телефоном
                 if (isPhoneCommand(lower)) {
                     setStatus("Планирую...")
 
-                    // Проверяем доступность AccessibilityService
-                    val accEnabled = isAccessibilityEnabled()
-                    if (!accEnabled) {
-                        addMessage("ai", "⚠️ Служба управления отключена, сэр. Зайдите: Настройки → Спец. возможности → SINGULA Agent → Включить")
+                    if (!isAccessibilityEnabled()) {
+                        addMessage("ai", "⚠️ Служба управления отключена, сэр. Настройки → Спец. возможности → SINGULA Agent → Включить")
                         voice.speak("Служба управления отключена, сэр.")
                         return@launch
                     }
 
-                    // 1. Получаем шаги от AI
                     val steps = agent.parseCommand(text)
 
                     if (steps.isEmpty() || steps.first().action == "error") {
@@ -356,20 +363,16 @@ class MainActivity : AppCompatActivity() {
                         return@launch
                     }
 
-                    // 2. Сообщаем что делаем (коротко)
-                    addMessage("ai", "Выполняю: ${steps.firstOrNull { it.description.isNotEmpty() }?.description ?: text}")
+                    addMessage("ai", "Выполняю, сэр.")
                     voice.speak("Выполняю, сэр.")
 
-                    // 3. Выполняем шаги по порядку
                     setStatus("Выполняю...")
                     val result = executor.execute(steps)
 
-                    // 4. Финальный ответ
                     addMessage("ai", result)
                     voice.speak(result)
 
                 } else {
-                    // Обычный разговор с AI
                     setStatus("Думаю...")
                     val reply = agent.chat(text)
                     val clean = reply.replace(Regex("\\[ACTION:[^\\]]*\\]"), "").trim()
@@ -378,7 +381,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
             } catch (e: Exception) {
-                addMessage("ai", "Помехи в канале, сэр. (${e.message})")
+                addMessage("ai", "Помехи в канале, сэр.")
             } finally {
                 isBusy = false
                 setStatus("ОНЛАЙН")
@@ -504,30 +507,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showKeyDialog() {
-        try {
-            val input = EditText(this).apply {
-                hint = "gsk_... (Groq API Key)"
-                setHintTextColor(Color.parseColor("#4A6080"))
-                setTextColor(Color.parseColor("#C0D0E8"))
-                setBackgroundColor(Color.parseColor("#040A1A"))
-                setPadding(20, 16, 20, 16)
-                setText(prefs.getString("gemini_key", "") ?: "")
-            }
-            AlertDialog.Builder(this)
-                .setTitle("API Key")
-                .setMessage("Бесплатный Groq ключ: console.groq.com\nРегистрация без карты, без лимитов")
-                .setView(input)
-                .setPositiveButton("Сохранить") { _, _ ->
-                    val key = input.text.toString().trim()
-                    if (key.isNotEmpty()) {
-                        prefs.edit().putString("gemini_key", key).apply()
-                        agent.setApiKey(key)
-                        addMessage("ai", "Ключ сохранён. Готова к работе, сэр!")
-                        voice.speak("Ключ принят. Готова к работе, сэр!")
-                    }
+        runOnUiThread {
+            try {
+                val input = EditText(this).apply {
+                    hint = "gsk_... (Groq API Key)"
+                    setHintTextColor(Color.parseColor("#4A6080"))
+                    setTextColor(Color.parseColor("#C0D0E8"))
+                    setBackgroundColor(Color.parseColor("#040A1A"))
+                    setPadding(20, 16, 20, 16)
+                    setText(prefs.getString("gemini_key", "") ?: "")
                 }
-                .setNegativeButton("Отмена", null).show()
-        } catch (e: Exception) {}
+                AlertDialog.Builder(this)
+                    .setTitle("API Key")
+                    .setMessage("Бесплатный Groq ключ: console.groq.com\nРегистрация без карты, без лимитов")
+                    .setView(input)
+                    .setPositiveButton("Сохранить") { _, _ ->
+                        val key = input.text.toString().trim()
+                        if (key.isNotEmpty()) {
+                            prefs.edit().putString("gemini_key", key).apply()
+                            agent.setApiKey(key)
+                            addMessage("ai", "Ключ сохранён. Готова к работе, сэр!")
+                            voice.speak("Ключ принят. Готова к работе, сэр!")
+                        }
+                    }
+                    .setNegativeButton("Отмена", null).show()
+            } catch (e: Exception) {}
+        }
     }
 
     private fun isPhoneCommand(text: String): Boolean {
@@ -537,7 +542,7 @@ class MainActivity : AppCompatActivity() {
             "whatsapp", "вотсап", "instagram", "инстаграм", "spotify", "спотифай",
             "тикток", "discord", "дискорд", "вконтакте", "вк", "браузер",
             "настройки", "будильник", "таймер", "загугли", "погугли",
-            "зайди", "перейди", "набери", "позвони"
+            "зайди", "перейди", "набери", "листай", "прокрути", "скролл"
         )
         return kw.any { text.contains(it) }
     }
