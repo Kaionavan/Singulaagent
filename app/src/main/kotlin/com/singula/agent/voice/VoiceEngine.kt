@@ -21,26 +21,39 @@ class VoiceEngine(private val context: Context) {
     var onError: ((String) -> Unit)? = null
     var onSpeakDone: (() -> Unit)? = null
 
+    // Колбэк для паузы/возобновления wake word детектора
+    var onSpeakStart: (() -> Unit)? = null
+    var onSpeakEnd: (() -> Unit)? = null
+
     init { initTTS() }
 
     private fun initTTS() {
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                // Ставим русский язык
                 val ruResult = tts?.setLanguage(Locale("ru", "RU"))
                 if (ruResult == TextToSpeech.LANG_MISSING_DATA ||
                     ruResult == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    // Если русского нет — ставим английский
                     tts?.setLanguage(Locale.ENGLISH)
                 }
-                tts?.setSpeechRate(0.88f)  // чуть медленнее — понятнее
-                tts?.setPitch(0.85f)        // чуть ниже — мужественнее
+                tts?.setSpeechRate(0.88f)
+                tts?.setPitch(0.85f)
                 ttsReady = true
 
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {}
-                    override fun onDone(utteranceId: String?) { onSpeakDone?.invoke() }
-                    override fun onError(utteranceId: String?) {}
+                    override fun onStart(utteranceId: String?) {
+                        // Говорим wake word детектору — пауза, иначе услышит свой голос
+                        onSpeakStart?.invoke()
+                    }
+                    override fun onDone(utteranceId: String?) {
+                        onSpeakDone?.invoke()
+                        // Возобновляем wake word через 800мс после конца речи
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            onSpeakEnd?.invoke()
+                        }, 800)
+                    }
+                    override fun onError(utteranceId: String?) {
+                        onSpeakEnd?.invoke()
+                    }
                 })
             }
         }
@@ -49,7 +62,6 @@ class VoiceEngine(private val context: Context) {
     fun speak(text: String) {
         if (!ttsReady) return
         tts?.stop()
-        // Очищаем текст от спецсимволов перед озвучкой
         val clean = text
             .replace(Regex("\\[ACTION:[^\\]]*\\]"), "")
             .replace("▸", "")
@@ -58,6 +70,8 @@ class VoiceEngine(private val context: Context) {
         if (clean.isEmpty()) return
         tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "sng_${System.currentTimeMillis()}")
     }
+
+    fun isSpeaking(): Boolean = tts?.isSpeaking == true
 
     fun startListening() {
         stopListening()
