@@ -152,7 +152,7 @@ maps=com.google.android.apps.maps, gmail=com.google.android.gm
     }
 
     private suspend fun callRaw(bodyStr: String): String = withContext(Dispatchers.IO) {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=$apiKey"
         val req = Request.Builder().url(url)
             .post(bodyStr.toRequestBody("application/json".toMediaType())).build()
         client.newCall(req).execute().use { it.body?.string() ?: "{}" }
