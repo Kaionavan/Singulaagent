@@ -59,9 +59,16 @@ class GeminiAgent(private val context: Context) {
         }
         val reply = try {
             val raw = callRaw(body.toString())
-            JSONObject(raw).getJSONArray("candidates")
-                .getJSONObject(0).getJSONObject("content")
-                .getJSONArray("parts").getJSONObject(0).getString("text")
+            val json = JSONObject(raw)
+            // Проверяем на ошибку от API
+            if (json.has("error")) {
+                val err = json.getJSONObject("error")
+                "Ошибка API: ${err.optString("message", "неизвестная ошибка")}"
+            } else {
+                json.getJSONArray("candidates")
+                    .getJSONObject(0).getJSONObject("content")
+                    .getJSONArray("parts").getJSONObject(0).getString("text")
+            }
         } catch (e: Exception) {
             "Помехи в канале связи, сэр. (${e.message})"
         }
