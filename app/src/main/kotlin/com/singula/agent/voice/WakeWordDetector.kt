@@ -118,9 +118,9 @@ class WakeWordDetector(private val context: Context) {
 
                 if (hit != null) {
                     // Вырезаем wake word — остаток это команда
-                    var command = hit
-                    wakeWords.sortedByDescending { it.length }.forEach {
-                        command = command.replace(it, "")
+                    var command: String = hit
+                    wakeWords.sortedByDescending { it.length }.forEach { w ->
+                        command = command.replace(w, "")
                     }
                     command = command.trim().trimStart(',', '.', ' ', '-')
 
