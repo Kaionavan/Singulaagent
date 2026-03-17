@@ -469,7 +469,7 @@ class MainActivity : AppCompatActivity() {
     private fun showKeyDialog() {
         try {
             val input = EditText(this).apply {
-                hint = "AIza... (Gemini API Key)"
+                hint = "gsk_... (Groq API Key)"
                 setHintTextColor(Color.parseColor("#4A6080"))
                 setTextColor(Color.parseColor("#C0D0E8"))
                 setBackgroundColor(Color.parseColor("#040A1A"))
@@ -477,8 +477,8 @@ class MainActivity : AppCompatActivity() {
                 setText(prefs.getString("gemini_key", "") ?: "")
             }
             AlertDialog.Builder(this)
-                .setTitle("Gemini API Key")
-                .setMessage("Бесплатно на aistudio.google.com")
+                .setTitle("API Key")
+                .setMessage("Бесплатный Groq ключ: console.groq.com\nРегистрация без карты, без лимитов")
                 .setView(input)
                 .setPositiveButton("Сохранить") { _, _ ->
                     val key = input.text.toString().trim()
