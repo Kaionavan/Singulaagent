@@ -37,38 +37,21 @@ class GeminiAgent(private val context: Context) {
     suspend fun chat(userMessage: String): String = withContext(Dispatchers.IO) {
         val ctx = memory.getContextString()
         val history = memory.getHistory()
-
         val messages = mutableListOf<JSONObject>()
-        messages.add(JSONObject().apply {
-            put("role", "system")
-            put("content", "$SYS\n\n$ctx")
-        })
+        messages.add(JSONObject().apply { put("role", "system"); put("content", "$SYS\n\n$ctx") })
         history.takeLast(10).forEach { (role, text) ->
             messages.add(JSONObject().apply {
                 put("role", if (role == "ai") "assistant" else "user")
                 put("content", text)
             })
         }
-        messages.add(JSONObject().apply {
-            put("role", "user")
-            put("content", userMessage)
-        })
-
+        messages.add(JSONObject().apply { put("role", "user"); put("content", userMessage) })
         val reply = try {
             val raw = callGroq(messages)
             val json = JSONObject(raw)
-            if (json.has("error")) {
-                "Ошибка: ${json.getJSONObject("error").optString("message")}"
-            } else {
-                json.getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content")
-            }
-        } catch (e: Exception) {
-            "Помехи в канале связи, сэр. (${e.message})"
-        }
-
+            if (json.has("error")) "Ошибка: ${json.getJSONObject("error").optString("message")}"
+            else json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+        } catch (e: Exception) { "Помехи в канале связи, сэр. (${e.message})" }
         memory.addToHistory("user", userMessage)
         memory.addToHistory("ai", reply)
         extractFacts(userMessage)
@@ -77,140 +60,105 @@ class GeminiAgent(private val context: Context) {
 
     suspend fun parseCommand(command: String): List<AgentStep> = withContext(Dispatchers.IO) {
         val prompt = """
-Ты — система управления Android телефоном. Разбей команду на точные шаги.
+Управляй Android телефоном Samsung Galaxy M12 (экран 720x1600). Разбей команду на точные шаги.
 Команда: "$command"
-Ответь ТОЛЬКО JSON массивом. Никакого текста до или после JSON.
+Ответь ТОЛЬКО JSON массивом без текста до/после.
 
-ДЕЙСТВИЯ (action):
-- open_app: открыть приложение. target = package name
-- find_contact: найти контакт в мессенджере. text = имя
-- type_text: напечатать текст в активном поле ввода. text = текст
-- search: нажать иконку поиска и ввести запрос. text = запрос
-- click: нажать элемент. target = точный текст кнопки на экране
-- send: нажать кнопку отправки сообщения
-- scroll_down: листать вниз (3 свайпа)
-- scroll_up: листать вверх (3 свайпа)
-- back: кнопка назад
-- wait: подождать. text = миллисекунды
-- done: завершить. description = ответ пользователю
+ДЕЙСТВИЯ:
+- open_app: target=package
+- find_contact: text=имя (Telegram/WhatsApp)
+- type_text: text=текст
+- search: text=запрос (нажимает кнопку поиска потом вводит)
+- click: target=точный текст на экране
+- tap_coords: target="x,y" — тап по координатам
+- send: отправить сообщение
+- scroll_down: листать вниз
+- scroll_up: листать вверх
+- back: назад
+- wait: text=мс
+- done: description=ответ
 
-ПАКЕТЫ ПРИЛОЖЕНИЙ:
-- Телеграм/Telegram: org.telegram.messenger
-- Ютуб/YouTube: com.google.android.youtube
-- WhatsApp/Вотсап: com.whatsapp
-- Instagram/Инстаграм: com.instagram.android
-- Spotify/Спотифай: com.spotify.music
-- SoundCloud: com.soundcloud.android
-- ВКонтакте/ВК: com.vkontakte.android
-- Discord/Дискорд: com.discord
-- Chrome/Браузер: com.android.chrome
-- Настройки: com.android.settings
-- Карты/Maps: com.google.android.apps.maps
-- TikTok/Тикток: com.zhiliaoapp.musically
-- Погода Samsung: com.samsung.android.weather
-- Погода Google: com.google.android.googlequicksearchbox
-- Галерея: com.sec.android.gallery3d
-- Камера: com.sec.android.app.camera
-- Контакты: com.samsung.android.contacts
-- Телефон/Звонок: com.samsung.android.dialer
-- Файлы: com.samsung.android.myfiles
-- Магазин: com.android.vending
+ПАКЕТЫ:
+telegram=org.telegram.messenger
+youtube=com.google.android.youtube
+whatsapp=com.whatsapp
+instagram=com.instagram.android
+spotify=com.spotify.music
+soundcloud=com.soundcloud.android
+vk=com.vkontakte.android
+discord=com.discord
+chrome=com.android.chrome
+settings=com.android.settings
+maps=com.google.android.apps.maps
+tiktok=com.zhiliaoapp.musically
+weather=com.samsung.android.weather
+gallery=com.sec.android.gallery3d
+camera=com.sec.android.app.camera
+contacts=com.samsung.android.contacts
+phone=com.samsung.android.dialer
+files=com.samsung.android.myfiles
+calculator=com.sec.android.app.popupcalculator
+clock=com.sec.android.app.clockpackage
 
-ИНСТРУКЦИИ ДЛЯ КОНКРЕТНЫХ ПРИЛОЖЕНИЙ:
+INSTAGRAM нижняя панель (координаты для Samsung M12 720x1600):
+- Домой: tap_coords "72,1540"
+- Поиск: tap_coords "216,1540"
+- REELS: tap_coords "360,1540"  ← ВСЕГДА tap_coords для рилсов
+- Директ: tap_coords "504,1540"
+- Профиль: tap_coords "648,1540"
+НИКОГДА не используй click для кнопок Instagram — только tap_coords
 
-НАСТРОЙКИ — когда просят открыть конкретный раздел:
-- "открой настройки безопасность" → open_app настройки, потом click "Безопасность и конфиденциальность" или search текст раздела
-- "открой настройки звук" → open_app настройки, потом click "Звук и вибрация"
-- "открой настройки wifi" → open_app настройки, потом click "Подключения"
-- НЕ застревай в настройках — всегда добавляй click с точным названием раздела
+НАСТРОЙКИ Samsung (после open_app всегда добавляй click раздела):
+- безопасность → "Безопасность и конфиденциальность"
+- звук → "Звук и вибрация"
+- дисплей/экран → "Дисплей"
+- wifi/интернет/сеть → "Подключения"
+- аккаунты → "Учётные записи и резервное копирование"
+- общие → "Общие настройки"
+- уведомления → "Уведомления"
+- батарея → "Батарея"
+- доступность → "Специальные возможности"
+- память/хранилище → "Хранилище"
+- обои → "Обои и стиль"
 
-INSTAGRAM — кнопки на нижней панели:
-- "Главная" = кнопка домика
-- "Поиск" = кнопка лупы  
-- "Reels/Рилсы" = кнопка с иконкой видео/кино (третья снизу, contentDesc="Reels")
-- "Магазин" = четвёртая кнопка
-- "Профиль" = пятая кнопка (аватарка)
-- Для рилсов: click с target="Reels" (contentDesc в приложении именно "Reels")
+ПОГОДА: open_app com.samsung.android.weather (это отдельное приложение, НЕ в настройках)
 
-SOUNDCLOUD — поиск и воспроизведение:
-- Для поиска трека: open_app → click "Поиск" или Search → search текст трека → click "first_result"
-- Первый результат = нужный трек, не playlist
-- Для плейлиста: после поиска → scroll_down → click нужное название
+YOUTUBE: open_app → wait 2000 → tap_coords "648,72" (иконка поиска) → type_text запрос → wait 1500 → click "first_result"
 
-SPOTIFY — аналогично SoundCloud:
-- open_app → click "Поиск" → search трек → click "first_result"
-- Для плейлиста: search название → scroll_down → click название плейлиста
+SOUNDCLOUD/SPOTIFY: open_app → wait 2000 → click "Поиск" → wait 500 → type_text запрос → wait 2000 → click "first_result"
 
-YOUTUBE:
-- open_app → click иконку поиска (лупа вверху) → type_text запрос → click "first_result"
-
-ПОГОДА — это отдельное приложение, НЕ раздел настроек:
-- "открой погоду" → open_app com.samsung.android.weather
-- Если нет → open_app com.google.android.googlequicksearchbox → search "погода"
+TELEGRAM: open_app → find_contact имя → type_text текст → send → done
 
 ПРИМЕРЫ:
 
-"открой телеграм напиши Диме привет":
-[
-  {"action":"open_app","target":"org.telegram.messenger","description":"Открываю Telegram"},
-  {"action":"find_contact","text":"Дима","description":"Ищу Диму"},
-  {"action":"type_text","text":"привет","description":"Пишу сообщение"},
-  {"action":"send","description":"Отправляю"},
-  {"action":"done","description":"Сообщение отправлено, сэр."}
-]
+"открой инстаграм рилсы":
+[{"action":"open_app","target":"com.instagram.android","description":"Открываю Instagram"},{"action":"wait","text":"2500","description":"Жду загрузки"},{"action":"tap_coords","target":"360,1540","description":"Нажимаю Reels"},{"action":"done","description":"Открыл Reels, сэр."}]
 
-"открой инстаграм нажми рилсы":
-[
-  {"action":"open_app","target":"com.instagram.android","description":"Открываю Instagram"},
-  {"action":"wait","text":"2000","description":"Жду загрузки"},
-  {"action":"click","target":"Reels","description":"Нажимаю Reels"},
-  {"action":"done","description":"Открыл Reels, сэр."}
-]
+"листай рилсы":
+[{"action":"open_app","target":"com.instagram.android","description":"Открываю Instagram"},{"action":"wait","text":"2500"},{"action":"tap_coords","target":"360,1540","description":"Reels"},{"action":"wait","text":"1500"},{"action":"scroll_down","description":"Листаю"},{"action":"scroll_down"},{"action":"scroll_down"},{"action":"done","description":"Листаю рилсы, сэр."}]
 
-"открой настройки безопасность":
-[
-  {"action":"open_app","target":"com.android.settings","description":"Открываю настройки"},
-  {"action":"wait","text":"1500","description":"Жду загрузки"},
-  {"action":"click","target":"Безопасность и конфиденциальность","description":"Открываю безопасность"},
-  {"action":"done","description":"Открыл безопасность, сэр."}
-]
+"открой настройки звук":
+[{"action":"open_app","target":"com.android.settings","description":"Открываю настройки"},{"action":"wait","text":"1500"},{"action":"click","target":"Звук и вибрация","description":"Открываю звук"},{"action":"done","description":"Открыл звук, сэр."}]
 
-"включи саундклауд поставь трек монтера":
-[
-  {"action":"open_app","target":"com.soundcloud.android","description":"Открываю SoundCloud"},
-  {"action":"wait","text":"2000","description":"Жду загрузки"},
-  {"action":"click","target":"Поиск","description":"Открываю поиск"},
-  {"action":"search","text":"монтера","description":"Ищу трек"},
-  {"action":"click","target":"first_result","description":"Открываю трек"},
-  {"action":"done","description":"Включаю, сэр."}
-]
+"открой настройки общие":
+[{"action":"open_app","target":"com.android.settings","description":"Открываю настройки"},{"action":"wait","text":"1500"},{"action":"click","target":"Общие настройки","description":"Открываю общие настройки"},{"action":"done","description":"Открыл, сэр."}]
 
 "открой погоду":
-[
-  {"action":"open_app","target":"com.samsung.android.weather","description":"Открываю погоду"},
-  {"action":"done","description":"Открыл погоду, сэр."}
-]
+[{"action":"open_app","target":"com.samsung.android.weather","description":"Открываю погоду"},{"action":"done","description":"Открыл погоду, сэр."}]
 
-"листай рилсы инстаграм":
-[
-  {"action":"open_app","target":"com.instagram.android","description":"Открываю Instagram"},
-  {"action":"wait","text":"2000","description":"Жду загрузки"},
-  {"action":"click","target":"Reels","description":"Нажимаю Reels"},
-  {"action":"wait","text":"1500","description":"Жду загрузки"},
-  {"action":"scroll_down","description":"Листаю"},
-  {"action":"done","description":"Листаю рилсы, сэр."}
-]
+"открой телеграм напиши Диме привет":
+[{"action":"open_app","target":"org.telegram.messenger","description":"Открываю Telegram"},{"action":"find_contact","text":"Дима","description":"Ищу Диму"},{"action":"type_text","text":"привет","description":"Пишу"},{"action":"send","description":"Отправляю"},{"action":"done","description":"Отправлено, сэр."}]
+
+"включи саундклауд поставь монтера":
+[{"action":"open_app","target":"com.soundcloud.android","description":"Открываю SoundCloud"},{"action":"wait","text":"2000"},{"action":"click","target":"Поиск","description":"Поиск"},{"action":"wait","text":"500"},{"action":"type_text","text":"монтера"},{"action":"wait","text":"2000"},{"action":"click","target":"first_result","description":"Включаю"},{"action":"done","description":"Включаю, сэр."}]
 
 Только JSON. Без markdown. Без объяснений.
         """.trimIndent()
 
         try {
             val messages = listOf(
-                JSONObject().apply {
-                    put("role", "system")
-                    put("content", "Ты генерируешь ТОЛЬКО JSON массив шагов для управления Android. Никакого текста кроме JSON.")
-                },
-                JSONObject().apply { put("role", "user"); put("content", prompt) }
+                JSONObject().apply { put("role","system"); put("content","Только JSON массив. Никакого текста кроме JSON.") },
+                JSONObject().apply { put("role","user"); put("content",prompt) }
             )
             val raw = callGroq(messages)
             val text = JSONObject(raw).getJSONArray("choices")
@@ -242,7 +190,7 @@ YOUTUBE:
             put("model", "llama-3.3-70b-versatile")
             put("messages", JSONArray(messages))
             put("max_tokens", 800)
-            put("temperature", 0.2) // низкая температура = точнее следует инструкциям
+            put("temperature", 0.1)
         }
         val req = Request.Builder()
             .url("https://api.groq.com/openai/v1/chat/completions")

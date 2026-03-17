@@ -27,6 +27,17 @@ class CommandExecutor(private val context: Context) {
 
             when (step.action) {
 
+                "tap_coords" -> {
+                    // Тапнуть по точным координатам (для кнопок без текста, например Reels в Instagram)
+                    try {
+                        val parts = step.target.split(",")
+                        val x = parts[0].trim().toFloat()
+                        val y = parts[1].trim().toFloat()
+                        acc.tap(x, y)
+                        delay(800)
+                    } catch (_: Exception) {}
+                }
+
                 "open_app" -> {
                     launchApp(step.target)
                     delay(3000)
