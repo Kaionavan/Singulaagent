@@ -60,23 +60,24 @@ class GeminiAgent(private val context: Context) {
 
     suspend fun parseCommand(command: String): List<AgentStep> = withContext(Dispatchers.IO) {
         val prompt = """
-Управляй Android телефоном Samsung Galaxy M12 (экран 720x1600). Разбей команду на точные шаги.
+Ты управляешь Android Samsung Galaxy M12 (720x1600px). Разбей команду на шаги.
 Команда: "$command"
-Ответь ТОЛЬКО JSON массивом без текста до/после.
+ТОЛЬКО JSON массив. Никакого текста кроме JSON.
 
 ДЕЙСТВИЯ:
-- open_app: target=package
-- find_contact: text=имя (Telegram/WhatsApp)
-- type_text: text=текст
-- search: text=запрос (нажимает кнопку поиска потом вводит)
-- click: target=точный текст на экране
+- open_app: target=пакет
+- find_contact: text=имя — найти контакт в Telegram/WhatsApp
+- open_chat: text=название чата или группы — открыть конкретный чат/группу в Telegram
+- type_text: text=текст — напечатать в поле ввода
+- search: text=запрос — нажать поиск и ввести
+- click: target=текст на экране
 - tap_coords: target="x,y" — тап по координатам
 - send: отправить сообщение
 - scroll_down: листать вниз
 - scroll_up: листать вверх
 - back: назад
-- wait: text=мс
-- done: description=ответ
+- wait: text=миллисекунды
+- done: description=ответ пользователю
 
 ПАКЕТЫ:
 telegram=org.telegram.messenger
@@ -96,61 +97,129 @@ gallery=com.sec.android.gallery3d
 camera=com.sec.android.app.camera
 contacts=com.samsung.android.contacts
 phone=com.samsung.android.dialer
-files=com.samsung.android.myfiles
 calculator=com.sec.android.app.popupcalculator
 clock=com.sec.android.app.clockpackage
 
-INSTAGRAM нижняя панель (координаты для Samsung M12 720x1600):
-- Домой: tap_coords "72,1540"
-- Поиск: tap_coords "216,1540"
-- REELS: tap_coords "360,1540"  ← ВСЕГДА tap_coords для рилсов
-- Директ: tap_coords "504,1540"
-- Профиль: tap_coords "648,1540"
-НИКОГДА не используй click для кнопок Instagram — только tap_coords
+═══════════════════════════════
+INSTAGRAM — координаты нижней панели (ВСЕГДА tap_coords, никогда не click):
+- Домой:   tap_coords "72,1516"
+- Reels:   tap_coords "216,1516"   ← ВТОРАЯ КНОПКА СЛЕВА
+- Директ:  tap_coords "360,1516"
+- Поиск:   tap_coords "504,1516"
+- Профиль: tap_coords "634,1516"
 
-НАСТРОЙКИ Samsung (после open_app всегда добавляй click раздела):
-- безопасность → "Безопасность и конфиденциальность"
-- звук → "Звук и вибрация"
-- дисплей/экран → "Дисплей"
-- wifi/интернет/сеть → "Подключения"
-- аккаунты → "Учётные записи и резервное копирование"
-- общие → "Общие настройки"
-- уведомления → "Уведомления"
-- батарея → "Батарея"
-- доступность → "Специальные возможности"
-- память/хранилище → "Хранилище"
-- обои → "Обои и стиль"
+═══════════════════════════════
+TELEGRAM — три варианта:
+1. Написать контакту (человеку): open_app → find_contact имя → type_text текст → send → done
+2. Написать в группу/канал: open_app → open_chat название → type_text текст → send → done
+3. Просто открыть: open_app → done
 
-ПОГОДА: open_app com.samsung.android.weather (это отдельное приложение, НЕ в настройках)
+═══════════════════════════════
+НАСТРОЙКИ Samsung — ВСЕГДА после open_app добавляй click нужного раздела:
+безопасность       → "Безопасность и конфиденциальность"
+звук/громкость     → "Звук и вибрация"
+дисплей/яркость    → "Дисплей"
+wifi/интернет/сеть → "Подключения"
+аккаунты           → "Учётные записи и резервное копирование"
+общие              → "Общие настройки"
+уведомления        → "Уведомления"
+батарея            → "Батарея"
+доступность        → "Специальные возможности"
+хранилище/память   → "Хранилище"
+обои               → "Обои и стиль"
+приложения         → "Приложения"
+язык               → "Общие настройки" затем click "Язык"
 
-YOUTUBE: open_app → wait 2000 → tap_coords "648,72" (иконка поиска) → type_text запрос → wait 1500 → click "first_result"
+═══════════════════════════════
+НЕЙРОСЕТЬ/AI — когда говорят "открой нейросеть", "зайди в нейросеть", "открой AI":
+→ open_app com.android.chrome → wait 2000 → tap_coords "360,120" (адресная строка) → type_text "chat.deepseek.com" → send → done
+НЕ открывай настройки и не открывай камеру!
 
-SOUNDCLOUD/SPOTIFY: open_app → wait 2000 → click "Поиск" → wait 500 → type_text запрос → wait 2000 → click "first_result"
+ПОГОДА — отдельное приложение, НЕ настройки:
+→ open_app com.samsung.android.weather
 
-TELEGRAM: open_app → find_contact имя → type_text текст → send → done
+YOUTUBE: open_app → wait 2000 → tap_coords "648,72" → type_text запрос → wait 1500 → click "first_result"
 
+SOUNDCLOUD: open_app → wait 2000 → click "Поиск" → wait 500 → type_text запрос → wait 2000 → click "first_result"
+
+SPOTIFY: open_app → wait 2000 → click "Поиск" → wait 500 → type_text запрос → wait 2000 → click "first_result"
+
+═══════════════════════════════
 ПРИМЕРЫ:
 
 "открой инстаграм рилсы":
-[{"action":"open_app","target":"com.instagram.android","description":"Открываю Instagram"},{"action":"wait","text":"2500","description":"Жду загрузки"},{"action":"tap_coords","target":"360,1540","description":"Нажимаю Reels"},{"action":"done","description":"Открыл Reels, сэр."}]
+[
+  {"action":"open_app","target":"com.instagram.android","description":"Открываю Instagram"},
+  {"action":"wait","text":"2500"},
+  {"action":"tap_coords","target":"216,1516","description":"Нажимаю Reels"},
+  {"action":"done","description":"Открыл Reels, сэр."}
+]
 
-"листай рилсы":
-[{"action":"open_app","target":"com.instagram.android","description":"Открываю Instagram"},{"action":"wait","text":"2500"},{"action":"tap_coords","target":"360,1540","description":"Reels"},{"action":"wait","text":"1500"},{"action":"scroll_down","description":"Листаю"},{"action":"scroll_down"},{"action":"scroll_down"},{"action":"done","description":"Листаю рилсы, сэр."}]
+"листай рилсы инстаграм":
+[
+  {"action":"open_app","target":"com.instagram.android","description":"Открываю Instagram"},
+  {"action":"wait","text":"2500"},
+  {"action":"tap_coords","target":"216,1516","description":"Reels"},
+  {"action":"wait","text":"1500"},
+  {"action":"scroll_down","description":"Листаю"},
+  {"action":"scroll_down"},
+  {"action":"scroll_down"},
+  {"action":"done","description":"Листаю рилсы, сэр."}
+]
+
+"открой телеграм напиши Диме как дела":
+[
+  {"action":"open_app","target":"org.telegram.messenger","description":"Открываю Telegram"},
+  {"action":"find_contact","text":"Дима","description":"Ищу контакт Дима"},
+  {"action":"type_text","text":"как дела","description":"Пишу сообщение"},
+  {"action":"send","description":"Отправляю"},
+  {"action":"done","description":"Сообщение отправлено, сэр."}
+]
+
+"открой телеграм напиши в группу Друзья привет всем":
+[
+  {"action":"open_app","target":"org.telegram.messenger","description":"Открываю Telegram"},
+  {"action":"open_chat","text":"Друзья","description":"Открываю группу Друзья"},
+  {"action":"type_text","text":"привет всем","description":"Пишу сообщение"},
+  {"action":"send","description":"Отправляю"},
+  {"action":"done","description":"Отправлено в группу, сэр."}
+]
 
 "открой настройки звук":
-[{"action":"open_app","target":"com.android.settings","description":"Открываю настройки"},{"action":"wait","text":"1500"},{"action":"click","target":"Звук и вибрация","description":"Открываю звук"},{"action":"done","description":"Открыл звук, сэр."}]
+[
+  {"action":"open_app","target":"com.android.settings","description":"Открываю настройки"},
+  {"action":"wait","text":"1500"},
+  {"action":"click","target":"Звук и вибрация","description":"Открываю звук"},
+  {"action":"done","description":"Открыл звук, сэр."}
+]
 
-"открой настройки общие":
-[{"action":"open_app","target":"com.android.settings","description":"Открываю настройки"},{"action":"wait","text":"1500"},{"action":"click","target":"Общие настройки","description":"Открываю общие настройки"},{"action":"done","description":"Открыл, сэр."}]
+"открой нейросеть":
+[
+  {"action":"open_app","target":"com.android.chrome","description":"Открываю браузер"},
+  {"action":"wait","text":"2000"},
+  {"action":"tap_coords","target":"360,120","description":"Адресная строка"},
+  {"action":"type_text","text":"chat.deepseek.com","description":"Ввожу адрес"},
+  {"action":"send","description":"Перехожу"},
+  {"action":"done","description":"Открываю нейросеть, сэр."}
+]
 
 "открой погоду":
-[{"action":"open_app","target":"com.samsung.android.weather","description":"Открываю погоду"},{"action":"done","description":"Открыл погоду, сэр."}]
-
-"открой телеграм напиши Диме привет":
-[{"action":"open_app","target":"org.telegram.messenger","description":"Открываю Telegram"},{"action":"find_contact","text":"Дима","description":"Ищу Диму"},{"action":"type_text","text":"привет","description":"Пишу"},{"action":"send","description":"Отправляю"},{"action":"done","description":"Отправлено, сэр."}]
+[
+  {"action":"open_app","target":"com.samsung.android.weather","description":"Открываю погоду"},
+  {"action":"done","description":"Открыл погоду, сэр."}
+]
 
 "включи саундклауд поставь монтера":
-[{"action":"open_app","target":"com.soundcloud.android","description":"Открываю SoundCloud"},{"action":"wait","text":"2000"},{"action":"click","target":"Поиск","description":"Поиск"},{"action":"wait","text":"500"},{"action":"type_text","text":"монтера"},{"action":"wait","text":"2000"},{"action":"click","target":"first_result","description":"Включаю"},{"action":"done","description":"Включаю, сэр."}]
+[
+  {"action":"open_app","target":"com.soundcloud.android","description":"Открываю SoundCloud"},
+  {"action":"wait","text":"2000"},
+  {"action":"click","target":"Поиск","description":"Поиск"},
+  {"action":"wait","text":"500"},
+  {"action":"type_text","text":"монтера"},
+  {"action":"wait","text":"2000"},
+  {"action":"click","target":"first_result","description":"Включаю"},
+  {"action":"done","description":"Включаю, сэр."}
+]
 
 Только JSON. Без markdown. Без объяснений.
         """.trimIndent()

@@ -86,6 +86,24 @@ class CommandExecutor(private val context: Context) {
                     }
                 }
 
+                // ══ ОТКРЫТЬ ЧАТ/ГРУППУ в Telegram ══
+                "open_chat" -> {
+                    delay(800)
+                    val searchBtn = acc.findNodeByContentDesc("Search")
+                        ?: acc.findNodeByContentDesc("Поиск")
+                        ?: acc.findNodeByText("поиск")
+                    searchBtn?.let { acc.clickNode(it); delay(700) }
+                    val field = waitForEditText(acc, 3000) ?: continue
+                    acc.clickNode(field); delay(300)
+                    acc.typeText(field, step.text)
+                    delay(2000)
+                    val firstName = step.text.split(" ").first().lowercase()
+                    val results = acc.findAllContactResults(firstName)
+                    val target = if (results.size >= 2) results[1] else results.firstOrNull()
+                    if (target != null) { acc.clickNode(target); delay(1500) }
+                    else { acc.tapBelowSearchField(); delay(1500) }
+                }
+
                 "type_text" -> {
                     delay(800)
                     val node = waitForEditText(acc, 5000) ?: continue
