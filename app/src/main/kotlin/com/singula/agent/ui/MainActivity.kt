@@ -57,7 +57,6 @@ class MainActivity : AppCompatActivity() {
             init()
             requestMicPermission()
         } catch (e: Exception) {
-            // Если что-то пошло не так — показываем простой экран
             val tv = TextView(this)
             tv.text = "SINGULA\n\nОшибка запуска: ${e.message}"
             tv.setTextColor(Color.WHITE)
@@ -316,41 +315,73 @@ class MainActivity : AppCompatActivity() {
                 agent.setApiKey(key)
 
                 val lower = text.lowercase()
+
+                // Быстрые команды без AI
                 when {
-                    lower.contains("статус") -> {
+                    lower.contains("статус") && !lower.contains("открой") -> {
                         val info = sysMonitor.getSystemInfo()
-                        addMessage("ai", info); voice.speak("Статус готов, сэр.")
+                        addMessage("ai", info)
+                        voice.speak("Статус готов, сэр.")
                         return@launch
                     }
-                    lower.contains("который час") || lower.contains("время") -> {
+                    lower.contains("который час") || lower.contains("сколько времени") -> {
                         val t = sysMonitor.getCurrentTime()
-                        addMessage("ai", t); voice.speak(t); return@launch
+                        addMessage("ai", t)
+                        voice.speak(t)
+                        return@launch
                     }
-                    lower.contains("память") -> {
-                        showMemory(); return@launch
+                    lower.contains("покажи память") || lower.contains("что помнишь") -> {
+                        showMemory()
+                        return@launch
                     }
                 }
 
+                // Команда управления телефоном
                 if (isPhoneCommand(lower)) {
                     setStatus("Планирую...")
+
+                    // Проверяем доступность AccessibilityService
+                    val accEnabled = isAccessibilityEnabled()
+                    if (!accEnabled) {
+                        addMessage("ai", "⚠️ Служба управления отключена, сэр. Зайдите: Настройки → Спец. возможности → SINGULA Agent → Включить")
+                        voice.speak("Служба управления отключена, сэр.")
+                        return@launch
+                    }
+
+                    // 1. Получаем шаги от AI
                     val steps = agent.parseCommand(text)
-                    val reply = agent.chat(text)
-                    val clean = reply.replace(Regex("\\[ACTION:[^\\]]*\\]"), "").trim()
-                    addMessage("ai", clean)
-                    voice.speak(clean)
+
+                    if (steps.isEmpty() || steps.first().action == "error") {
+                        addMessage("ai", "Не смог разобрать команду, сэр.")
+                        return@launch
+                    }
+
+                    // 2. Сообщаем что делаем (коротко)
+                    addMessage("ai", "Выполняю: ${steps.firstOrNull { it.description.isNotEmpty() }?.description ?: text}")
+                    voice.speak("Выполняю, сэр.")
+
+                    // 3. Выполняем шаги по порядку
                     setStatus("Выполняю...")
-                    executor.execute(steps)
+                    val result = executor.execute(steps)
+
+                    // 4. Финальный ответ
+                    addMessage("ai", result)
+                    voice.speak(result)
+
                 } else {
+                    // Обычный разговор с AI
                     setStatus("Думаю...")
                     val reply = agent.chat(text)
                     val clean = reply.replace(Regex("\\[ACTION:[^\\]]*\\]"), "").trim()
                     addMessage("ai", clean)
                     voice.speak(clean)
                 }
+
             } catch (e: Exception) {
-                addMessage("ai", "Помехи в канале, сэр.")
+                addMessage("ai", "Помехи в канале, сэр. (${e.message})")
             } finally {
-                isBusy = false; setStatus("ОНЛАЙН")
+                isBusy = false
+                setStatus("ОНЛАЙН")
             }
         }
     }
@@ -395,59 +426,65 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addMessage(role: String, text: String) {
-        try {
-            val isAi = role == "ai"
-            val isSystem = role == "system"
-            val container = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = if (!isAi && !isSystem) Gravity.END else Gravity.START
-                setPadding(0, 3, 0, 3)
-            }
-            if (!isSystem) {
-                val name = TextView(this).apply {
-                    this.text = if (isAi) "SINGULA" else "ВЫ"
-                    textSize = 9f; setTextColor(Color.parseColor("#3A4A60"))
-                    setPadding(6, 0, 6, 2)
+        runOnUiThread {
+            try {
+                val isAi = role == "ai"
+                val isSystem = role == "system"
+                val container = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = if (!isAi && !isSystem) Gravity.END else Gravity.START
+                    setPadding(0, 3, 0, 3)
                 }
-                container.addView(name)
-            }
-            val bubble = TextView(this).apply {
-                this.text = text; textSize = 14f
-                setPadding(16, 12, 16, 12)
-                maxWidth = (resources.displayMetrics.widthPixels * 0.82).toInt()
-                setTextColor(when(role) {
-                    "ai" -> Color.parseColor("#BCD6F8")
-                    "system" -> Color.parseColor("#4A8060")
-                    else -> Color.parseColor("#C0D0E8")
-                })
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = 14f
-                    setColor(when(role) {
-                        "ai" -> Color.parseColor("#0A1E38")
-                        "system" -> Color.parseColor("#041208")
-                        else -> Color.parseColor("#140C02")
-                    })
-                    setStroke(1, when(role) {
-                        "ai" -> Color.parseColor("#1A3A60")
-                        "system" -> Color.parseColor("#0A2818")
-                        else -> Color.parseColor("#3A2808")
-                    })
+                if (!isSystem) {
+                    val name = TextView(this).apply {
+                        this.text = if (isAi) "SINGULA" else "ВЫ"
+                        textSize = 9f
+                        setTextColor(Color.parseColor("#3A4A60"))
+                        setPadding(6, 0, 6, 2)
+                    }
+                    container.addView(name)
                 }
-            }
-            container.addView(bubble)
-            chatLayout.addView(container)
-            scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
-        } catch (e: Exception) {}
+                val bubble = TextView(this).apply {
+                    this.text = text
+                    textSize = 14f
+                    setPadding(16, 12, 16, 12)
+                    maxWidth = (resources.displayMetrics.widthPixels * 0.82).toInt()
+                    setTextColor(when(role) {
+                        "ai" -> Color.parseColor("#BCD6F8")
+                        "system" -> Color.parseColor("#4A8060")
+                        else -> Color.parseColor("#C0D0E8")
+                    })
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = 14f
+                        setColor(when(role) {
+                            "ai" -> Color.parseColor("#0A1E38")
+                            "system" -> Color.parseColor("#041208")
+                            else -> Color.parseColor("#140C02")
+                        })
+                        setStroke(1, when(role) {
+                            "ai" -> Color.parseColor("#1A3A60")
+                            "system" -> Color.parseColor("#0A2818")
+                            else -> Color.parseColor("#3A2808")
+                        })
+                    }
+                }
+                container.addView(bubble)
+                chatLayout.addView(container)
+                scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
+            } catch (e: Exception) {}
+        }
     }
 
     private fun setStatus(text: String) {
-        try {
-            val online = text == "ОНЛАЙН"
-            statusLabel.text = "● $text"
-            statusLabel.setTextColor(
-                if (online) Color.parseColor("#22FF88") else Color.parseColor("#C8A84B")
-            )
-        } catch (e: Exception) {}
+        runOnUiThread {
+            try {
+                val online = text == "ОНЛАЙН"
+                statusLabel.text = "● $text"
+                statusLabel.setTextColor(
+                    if (online) Color.parseColor("#22FF88") else Color.parseColor("#C8A84B")
+                )
+            } catch (e: Exception) {}
+        }
     }
 
     private fun startMetricsUpdate() {
@@ -494,10 +531,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isPhoneCommand(text: String): Boolean {
-        val kw = listOf("открой","запусти","включи","найди","поищи","напиши",
-            "отправь","позвони","youtube","ютуб","telegram","телеграм",
-            "whatsapp","вотсап","instagram","spotify","тикток","discord",
-            "вконтакте","браузер","настройки","будильник","таймер","загугли")
+        val kw = listOf(
+            "открой", "запусти", "включи", "найди", "поищи", "напиши",
+            "отправь", "позвони", "youtube", "ютуб", "telegram", "телеграм",
+            "whatsapp", "вотсап", "instagram", "инстаграм", "spotify", "спотифай",
+            "тикток", "discord", "дискорд", "вконтакте", "вк", "браузер",
+            "настройки", "будильник", "таймер", "загугли", "погугли",
+            "зайди", "перейди", "набери", "позвони"
+        )
         return kw.any { text.contains(it) }
     }
 
@@ -505,7 +546,7 @@ class MainActivity : AppCompatActivity() {
         return try {
             val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
             am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-                .any { it.id.contains("singula") }
+                .any { it.id.contains("singula", ignoreCase = true) }
         } catch (e: Exception) { false }
     }
 
@@ -518,7 +559,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        // Разрешение дано — всё готово
     }
 
     override fun onDestroy() {
